@@ -1,120 +1,212 @@
-# Synapse Racing - Backend
+<p align="center">
+  <img src="https://avatars.githubusercontent.com/u/315996143?s=240&v=4" alt="Synapse Racing" width="112" />
+</p>
 
-API NestJS para autenticacion, persistencia de entrenamientos NEAT y carreras multijugador.
+<h1 align="center">Synapse Racing — Backend</h1>
 
-## Requisitos
+<p align="center">
+  NestJS API for authentication, vehicle customization, NEAT training persistence, and authoritative multiplayer simulation.
+</p>
 
-- Node.js 24 o superior.
-- Corepack habilitado.
-- MongoDB con replica set habilitado (tambien puede ser de un nodo). Para desarrollo local: `docker compose up -d mongo`.
+<p align="center">
+  <a href="https://github.com/synapse-racing">github.com/synapse-racing</a>
+</p>
 
-## Instalacion
+---
+
+## Requirements
+
+- Node.js 24 or higher
+- Corepack enabled (`corepack enable`)
+- MongoDB 8 with a replica set (required for multi-document transactions)
+
+For local development, Docker Compose provides a single-node replica set:
+
+```bash
+docker compose up -d mongo
+```
+
+## Installation
 
 ```bash
 corepack enable
 pnpm install
 ```
 
-Copia `.env.example` como `.env`. Los valores incluidos sirven para desarrollo local y no deben utilizarse como secretos de produccion.
+Copy the environment template:
 
-## Base de datos
+```bash
+cp .env.example .env
+```
+
+| Variable | Description |
+|---|---|
+| `NODE_ENV` | `development` or `production` |
+| `PORT` | HTTP port (default `3000`) |
+| `FRONTEND_URL` | Allowed CORS origin |
+| `DATABASE_URL` | MongoDB connection string (must include replica set) |
+| `JWT_ACCESS_SECRET` | At least 32 characters |
+| `JWT_REFRESH_SECRET` | At least 32 characters, different from the access secret |
+| `JWT_ACCESS_TTL_SECONDS` | Access token lifetime in seconds (default `900`) |
+| `JWT_REFRESH_TTL_DAYS` | Refresh token lifetime in days (default `30`) |
+
+## Database Setup
+
+Generate the Prisma client after installing dependencies:
 
 ```bash
 pnpm prisma:generate
 ```
 
-Para preparar colecciones e indices en una base nueva:
+Push the schema and create indexes on a fresh database:
 
 ```bash
 pnpm db:push
 ```
 
-`DATABASE_URL` debe incluir la base y el replica set. MongoDB usa `db push`, no Prisma Migrate. `db:deploy` es un alias de `db:push` para los scripts existentes. No se importa SQLite ni se reinician bases existentes. El historial SQL se conserva solo como referencia de la version anterior.
+> Synapse uses **MongoDB** as its database. Prisma Migrate is not used — schema changes are applied with `db push`. The `DATABASE_URL` must point to a MongoDB replica set; standalone instances do not support multi-document transactions.
 
-Los UUID se guardan como cadenas en `_id`, conservando el campo `id` de la API. Las colecciones son `users`, `refresh_sessions`, `training_runs`, `training_checkpoints` y `generation_metrics`. Configuracion, genoma y snapshot son objetos BSON embebidos; el historial creciente utiliza referencias. Las salas multijugador siguen en memoria. Los cinco ejemplos JSON completos y enlazados estan en [docs/mongodb-examples.json](docs/mongodb-examples.json); usan una poblacion tecnica reducida de dos pilotos para mostrar todo el snapshot sin omisiones (la interfaz normal usa 24).
+### Collections
 
-Las pruebas e2e levantan y destruyen un replica set local exclusivo con `mongodb-memory-server`; no usan la base configurada en `.env`. La primera ejecucion descarga el binario oficial de MongoDB.
+| Collection | Description |
+|---|---|
+| `users` | Accounts with hashed passwords and vehicle appearance |
+| `refresh_sessions` | Active refresh tokens (stored as Argon2id hashes) |
+| `training_runs` | NEAT run metadata, best genome, and NEAT config |
+| `training_checkpoints` | Full population snapshots per generation |
+| `generation_metrics` | Per-generation fitness, average, species count, duration |
 
-## Ejecucion
+Full example documents are available in [`docs/mongodb-examples.json`](docs/mongodb-examples.json).
 
-```bash
-pnpm start:dev
-```
-
-- API: `http://localhost:3000/api`
-- Health check: `http://localhost:3000/api/health`
-- Swagger: `http://localhost:3000/api/docs`
-- Liveness: `http://localhost:3000/api/health/live`
-- Readiness: `http://localhost:3000/api/health/ready`
-
-Swagger se deshabilita cuando `NODE_ENV=production`.
-
-## Autenticacion
-
-```text
-POST /api/auth/register
-POST /api/auth/login
-POST /api/auth/refresh
-POST /api/auth/logout
-GET  /api/auth/me
-```
-
-Una cuenta puede mantener varias sesiones simultaneas. Cerrar sesion revoca solo la sesion del navegador actual.
-
-El access token se envia como Bearer JWT. El refresh token es rotatorio y se almacena en una cookie `HttpOnly`; la base de datos conserva exclusivamente su hash Argon2id.
-
-## Entrenamientos
-
-```text
-POST   /api/training-runs
-GET    /api/training-runs
-GET    /api/training-runs/:id
-PATCH  /api/training-runs/:id/status
-DELETE /api/training-runs/:id
-POST   /api/training-runs/:id/checkpoints
-GET    /api/training-runs/:id/checkpoints/latest
-GET    /api/training-runs/:id/metrics
-GET    /api/training-runs/:id/best-genome
-```
-
-Todos los endpoints requieren Bearer JWT y filtran los recursos por el usuario autenticado. Checkpoint, metrica y resumen se actualizan dentro de una transaccion Prisma.
-
-## Multijugador
-
-Socket.IO utiliza el namespace `/multiplayer`. El access token se envia en `auth.token` durante el handshake.
-
-```text
-room:create
-room:join
-room:leave
-player:ready
-race:start
-race:input
-```
-
-El servidor ejecuta la simulacion autoritativa a 20 Hz y publica `race:snapshot` a 10 Hz. Las salas son efimeras y viven en memoria durante esta version.
-
-## Verificaciones
+## Running
 
 ```bash
-pnpm lint
-pnpm test
-pnpm test:e2e
-pnpm build
+pnpm start:dev   # Development (watch mode)
+pnpm start:prod  # Production (compiled dist)
 ```
 
-## Estructura inicial
+| Endpoint | URL |
+|---|---|
+| REST API | `http://localhost:3000/api` |
+| Swagger UI | `http://localhost:3000/api/docs` _(disabled in production)_ |
+| Health check | `http://localhost:3000/api/health` |
+| Liveness | `http://localhost:3000/api/health/live` |
+| Readiness | `http://localhost:3000/api/health/ready` |
 
-```text
+## API Reference
+
+### Authentication
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/api/auth/register` | Create a new account |
+| `POST` | `/api/auth/login` | Login and receive tokens |
+| `POST` | `/api/auth/refresh` | Rotate the refresh token |
+| `POST` | `/api/auth/logout` | Revoke the current session |
+| `GET` | `/api/auth/me` | Get the authenticated user's profile |
+
+Access tokens are sent as `Bearer` JWT. Refresh tokens are rotated on each use, stored in an `HttpOnly` cookie, and persisted as Argon2id hashes. Multiple concurrent sessions per account are supported; logout only revokes the current session.
+
+### Garage
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/users/me/appearance` | Get the equipped vehicle appearance |
+| `PATCH` | `/api/users/me/appearance` | Save a new vehicle appearance |
+
+Appearance covers vehicle model, paint color, finish type, and race number. Saved data is loaded by the frontend on every session restore and applied to the car in races and the training view.
+
+### Training Runs
+
+All endpoints require Bearer JWT and are scoped to the authenticated user.
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/api/training-runs` | Create a new NEAT training run |
+| `GET` | `/api/training-runs` | List all training runs |
+| `GET` | `/api/training-runs/:id` | Get a training run by ID |
+| `PATCH` | `/api/training-runs/:id/status` | Update run status |
+| `DELETE` | `/api/training-runs/:id` | Delete a training run |
+| `POST` | `/api/training-runs/:id/checkpoints` | Save a generation checkpoint |
+| `GET` | `/api/training-runs/:id/checkpoints/latest` | Load the latest checkpoint |
+| `GET` | `/api/training-runs/:id/metrics` | Get per-generation metrics history |
+| `GET` | `/api/training-runs/:id/best-genome` | Get the best genome ever recorded |
+
+Checkpoint, metric, and run summary are written atomically inside a Prisma transaction. Checkpoints store the full population, PRNG state, and innovation table to allow deterministic resumption.
+
+### Multiplayer
+
+Socket.IO namespace: `/multiplayer`. The access token must be sent in `auth.token` during the handshake.
+
+| Event (emit) | Description |
+|---|---|
+| `room:create` | Create a new private room |
+| `room:join` | Join a room by code |
+| `room:leave` | Leave the current room |
+| `player:ready` | Signal readiness to start |
+| `race:start` | Start the race (host only) |
+| `race:input` | Send steering/throttle/brake inputs |
+
+| Event (receive) | Description |
+|---|---|
+| `race:snapshot` | Authoritative race state broadcast at 10 Hz |
+
+The server runs the physics simulation at 20 Hz. Rooms are ephemeral and live in memory; they are destroyed when all players disconnect.
+
+## Project Structure
+
+```
 src/
-  config/          # Validacion de variables de entorno
-  infrastructure/  # Prisma y adaptadores externos
-  modules/          # Auth, usuarios y futuros dominios
-  app.setup.ts     # Configuracion HTTP compartida
+├── config/               # Environment variable validation (Zod)
+├── infrastructure/
+│   └── database/         # Prisma service and connection management
+└── modules/
+    ├── auth/             # JWT auth, refresh session management
+    │   ├── application/  # Use cases (register, login, refresh, logout)
+    │   ├── domain/       # Auth entities and port interfaces
+    │   ├── infrastructure/  # Guards, token strategies
+    │   └── presentation/ # Auth controller, DTOs
+    ├── garage/           # Vehicle appearance endpoint
+    ├── multiplayer/      # Socket.IO gateway, rooms, authoritative simulation
+    ├── training/         # Training run and checkpoint CRUD
+    └── users/            # User service and appearance persistence
 ```
 
-Las funcionalidades se agregaran como modulos bajo `src/modules` conforme avance cada especificacion.
+## Scripts
 
-## Produccion
+| Command | Description |
+|---|---|
+| `pnpm start:dev` | Start in watch mode |
+| `pnpm start:prod` | Start compiled production build |
+| `pnpm build` | Compile TypeScript to `dist/` |
+| `pnpm lint` | Run ESLint |
+| `pnpm lint:fix` | Auto-fix lint errors |
+| `pnpm test` | Run Jest unit tests |
+| `pnpm test:e2e` | Run end-to-end tests (spins up an in-memory MongoDB replica set) |
+| `pnpm test:cov` | Run unit tests with coverage |
+| `pnpm prisma:generate` | Generate Prisma Client |
+| `pnpm db:push` | Push schema to the database and create indexes |
+| `pnpm db:studio` | Open Prisma Studio |
 
-Consulta [DEPLOYMENT.md](./DEPLOYMENT.md) para desplegar con Docker Compose, ejecutar migraciones, terminar TLS y gestionar backups.
+> E2E tests use `mongodb-memory-server` and never touch the database configured in `.env`. The first run downloads the official MongoDB binary automatically.
+
+## Docker
+
+A `Dockerfile` and two Compose files are included:
+
+| File | Purpose |
+|---|---|
+| `compose.yaml` | Local development stack (MongoDB replica set + backend) |
+| `compose.prod.yaml` | Production stack (external MongoDB + frontend) |
+
+```bash
+# Development
+docker compose up -d
+
+# Production
+docker compose --env-file .env.production -f compose.prod.yaml up -d --build --wait
+```
+
+The Docker entrypoint runs `prisma db push --skip-generate` before starting the API. If index creation fails, the API will not start.
+
+See [DEPLOYMENT.md](./DEPLOYMENT.md) for full instructions on TLS termination, Pterodactyl hosting, backups, and production environment variables.
