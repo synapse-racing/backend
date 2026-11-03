@@ -17,3 +17,10 @@ compose*.yaml
 *.sqlite
 *.sqlite-*
 /data/
+
+tmp
+exports
+docs/archive
+*.tsbuildinfo
+*.zip
+AGENTS.md

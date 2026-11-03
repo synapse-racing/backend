@@ -157,7 +157,7 @@ The server runs the physics simulation at 20 Hz. Rooms are ephemeral and live in
 
 ```
 src/
-├── config/               # Environment variable validation (Zod)
+├── config/               # Environment variable validation
 ├── infrastructure/
 │   └── database/         # Prisma service and connection management
 └── modules/
@@ -166,7 +166,6 @@ src/
     │   ├── domain/       # Auth entities and port interfaces
     │   ├── infrastructure/  # Guards, token strategies
     │   └── presentation/ # Auth controller, DTOs
-    ├── garage/           # Vehicle appearance endpoint
     ├── multiplayer/      # Socket.IO gateway, rooms, authoritative simulation
     ├── training/         # Training run and checkpoint CRUD
     └── users/            # User service and appearance persistence
@@ -210,3 +209,7 @@ docker compose --env-file .env.production -f compose.prod.yaml up -d --build --w
 The Docker entrypoint runs `prisma db push --skip-generate` before starting the API. If index creation fails, the API will not start.
 
 See [DEPLOYMENT.md](./DEPLOYMENT.md) for full instructions on TLS termination, Pterodactyl hosting, backups, and production environment variables.
+
+## Repository guidance
+
+See [AGENTS.md](AGENTS.md) for architecture, data protection, gameplay contracts and contributor rules. Former SQLite migrations are preserved in [docs/archive](docs/archive/README.md) and are not part of the active MongoDB schema.
