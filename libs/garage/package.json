@@ -1,0 +1,19 @@
+{
+  "name": "@synapse/garage",
+  "version": "0.0.0",
+  "private": true,
+  "license": "UNLICENSED",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json"
+  },
+  "dependencies": {
+    "@nestjs/common": "^11.0.1",
+    "@nestjs/swagger": "^11.4.7",
+    "class-validator": "^0.15.1",
+    "@synapse/auth": "workspace:*",
+    "@synapse/domain": "workspace:*",
+    "@synapse/users": "workspace:*"
+  }
+}

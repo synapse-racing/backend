@@ -29,6 +29,12 @@ Importa `deploy/pterodactyl/egg-synapse-mongodb.json`. Copia `start-pterodactyl.
 
 Para habilitar el replica set del servidor de MongoDB consulta [PTERODACTYL-MONGODB.md](deploy/pterodactyl/PTERODACTYL-MONGODB.md). No ejecutes el backend nuevo contra un MongoDB standalone.
 
+## Documentación Swagger
+
+Swagger está disponible en /api/docs y su esquema JSON en /api/docs-json. Por defecto se deshabilita en producción. Para habilitarlo explícitamente, añade SWAGGER_ENABLED=true a .env (Pterodactyl) o .env.production (Compose) y reinicia el backend. Para desactivarlo, usa false. Solo se aceptan true y false.
+
+El script de Pterodactyl mantiene NODE_ENV=production; no es necesario cambiarlo. La variable de Swagger se carga por separado. Las variables configuradas en el panel tienen prioridad sobre .env: evita definir valores contradictorios en ambos sitios. La documentación no elimina la autenticación de los endpoints; utiliza Authorize con un access token para probar rutas protegidas.
+
 ## Verificacion y recuperacion
 
 Comprueba `/api/health/ready`, registro, login, guardado y recuperacion de una generacion. Las pruebas e2e usan una base temporal local y nunca tu servidor externo. Conserva el servidor y los datos SQLite anteriores hasta aprobar el cambio; volver al codigo previo permite seguir usando esa base.

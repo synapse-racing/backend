@@ -6,6 +6,7 @@ services:
     restart: unless-stopped
     environment:
       NODE_ENV: production
+      SWAGGER_ENABLED: ${SWAGGER_ENABLED:-false}
       PORT: 3000
       FRONTEND_URL: ${PUBLIC_APP_URL:?PUBLIC_APP_URL is required}
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}

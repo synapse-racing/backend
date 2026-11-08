@@ -42,6 +42,7 @@ cp .env.example .env
 | Variable | Description |
 |---|---|
 | `NODE_ENV` | `development` or `production` |
+| `SWAGGER_ENABLED` | `true` or `false`; defaults to enabled outside production |
 | `PORT` | HTTP port (default `3000`) |
 | `FRONTEND_URL` | Allowed CORS origin |
 | `DATABASE_URL` | MongoDB connection string (must include replica set) |
@@ -88,7 +89,7 @@ pnpm start:prod  # Production (compiled dist)
 | Endpoint | URL |
 |---|---|
 | REST API | `http://localhost:3000/api` |
-| Swagger UI | `http://localhost:3000/api/docs` _(disabled in production)_ |
+| Swagger UI | `http://localhost:3000/api/docs` _(production requires `SWAGGER_ENABLED=true`)_ |
 | Health check | `http://localhost:3000/api/health` |
 | Liveness | `http://localhost:3000/api/health/live` |
 | Readiness | `http://localhost:3000/api/health/ready` |

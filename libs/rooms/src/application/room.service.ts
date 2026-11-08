@@ -1,0 +1,398 @@
+import { Injectable } from '@nestjs/common';
+import { defaultAppearance, type VehicleAppearance } from '@synapse/domain';
+import { randomBytes } from 'node:crypto';
+import { RaceSimulation } from '@synapse/domain';
+import type { NeatGenome } from '@synapse/domain';
+import {
+  generateTrack,
+  parseTrackRecipe,
+  type TrackRecipe,
+} from '@synapse/domain';
+import {
+  PublicRoomState,
+  RaceInput,
+  RaceResult,
+  RaceSnapshot,
+  RoomPlayer,
+  RoomStatus,
+} from '@synapse/domain';
+
+interface Room {
+  code: string;
+  hostUserId: string;
+  timeScale: number;
+  status: RoomStatus;
+  maxPlayers: number;
+  track: TrackRecipe;
+  players: Map<string, RoomPlayer>;
+  race?: RaceSimulation;
+}
+
+export class RoomError extends Error {
+  constructor(
+    readonly code: string,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+export interface RoomTickUpdate {
+  code: string;
+  state: PublicRoomState;
+  snapshot: RaceSnapshot;
+  result: RaceResult | null;
+}
+
+@Injectable()
+export class RoomService {
+  private readonly rooms = new Map<string, Room>();
+  private readonly roomBySocket = new Map<string, string>();
+  private readonly roomByUser = new Map<string, string>();
+
+  create(
+    user: { id: string; username: string },
+    socketId: string,
+    maxPlayers: number,
+    appearance: VehicleAppearance = defaultAppearance,
+  ): PublicRoomState {
+    this.ensureAvailable(user.id);
+    if (!Number.isInteger(maxPlayers) || maxPlayers < 2 || maxPlayers > 64) {
+      throw new RoomError(
+        'INVALID_CAPACITY',
+        'La capacidad debe ser un número entero entre 2 y 64',
+      );
+    }
+
+    const code = this.createCode();
+    const player: RoomPlayer = {
+      appearance: { ...appearance },
+      userId: user.id,
+      username: user.username,
+      socketId,
+      ready: false,
+      genome: null,
+      genomeName: null,
+    };
+    const room: Room = {
+      code,
+      hostUserId: user.id,
+      timeScale: 1,
+      status: 'LOBBY',
+      maxPlayers,
+      track: this.createTrackRecipe(),
+      players: new Map([[user.id, player]]),
+    };
+    this.rooms.set(code, room);
+    this.indexPlayer(player, code);
+    return this.publicState(room);
+  }
+
+  join(
+    codeInput: string,
+    user: { id: string; username: string },
+    socketId: string,
+    appearance: VehicleAppearance = defaultAppearance,
+  ): PublicRoomState {
+    this.ensureAvailable(user.id);
+    const room = this.rooms.get(codeInput.trim().toUpperCase());
+    if (!room) throw new RoomError('ROOM_NOT_FOUND', 'Room not found');
+    if (room.status !== 'LOBBY') {
+      throw new RoomError('RACE_STARTED', 'The race has already started');
+    }
+    if (room.players.size >= room.maxPlayers) {
+      throw new RoomError('ROOM_FULL', 'Room is full');
+    }
+
+    const player: RoomPlayer = {
+      appearance: { ...appearance },
+      userId: user.id,
+      username: user.username,
+      socketId,
+      ready: false,
+      genome: null,
+      genomeName: null,
+    };
+    room.players.set(user.id, player);
+    this.indexPlayer(player, room.code);
+    return this.publicState(room);
+  }
+
+  leave(
+    socketId: string,
+  ): { code: string; state: PublicRoomState | null } | null {
+    const code = this.roomBySocket.get(socketId);
+    if (!code) return null;
+    const room = this.rooms.get(code);
+    if (!room) return null;
+
+    const player = [...room.players.values()].find(
+      (candidate) => candidate.socketId === socketId,
+    );
+    if (!player) return null;
+    this.roomBySocket.delete(socketId);
+    this.roomByUser.delete(player.userId);
+
+    if (room.status === 'RACING' || room.status === 'COUNTDOWN') {
+      room.race?.disconnect(player.userId);
+    }
+    room.players.delete(player.userId);
+
+    if (room.players.size === 0) {
+      this.rooms.delete(code);
+      return { code, state: null };
+    }
+    if (room.hostUserId === player.userId) {
+      const nextHost = room.players.values().next();
+      room.hostUserId = nextHost.done ? '' : nextHost.value.userId;
+    }
+    return { code, state: this.publicState(room) };
+  }
+
+  setReady(socketId: string, ready: boolean): PublicRoomState {
+    const { room, player } = this.requireMembership(socketId);
+    if (room.status !== 'LOBBY')
+      throw new RoomError('INVALID_STATE', 'Race is not in lobby');
+    if (ready && !player.genome) {
+      throw new RoomError('GENOME_REQUIRED', 'Select a trained genome first');
+    }
+    player.ready = Boolean(ready);
+    return this.publicState(room);
+  }
+
+  selectGenome(
+    socketId: string,
+    genome: NeatGenome,
+    genomeName: string,
+  ): PublicRoomState {
+    const { room, player } = this.requireMembership(socketId);
+    if (room.status !== 'LOBBY') {
+      throw new RoomError('INVALID_STATE', 'Race is not in lobby');
+    }
+    player.genome = genome;
+    player.genomeName = genomeName;
+    player.ready = false;
+    return this.publicState(room);
+  }
+
+  selectTrack(socketId: string, trackInput: TrackRecipe): PublicRoomState {
+    const { room, player } = this.requireMembership(socketId);
+    if (room.status !== 'LOBBY') {
+      throw new RoomError('INVALID_STATE', 'Race is not in lobby');
+    }
+    if (room.hostUserId !== player.userId) {
+      throw new RoomError(
+        'HOST_REQUIRED',
+        'Only the host can select the track',
+      );
+    }
+    room.track = parseTrackRecipe(trackInput);
+    for (const candidate of room.players.values()) candidate.ready = false;
+    return this.publicState(room);
+  }
+
+  start(
+    socketId: string,
+    now = Date.now(),
+  ): { state: PublicRoomState; startAt: number } {
+    const room = this.requireStartableRoom(socketId);
+    const players = [...room.players.values()];
+    room.race = new RaceSimulation(
+      players.map((candidate) => ({
+        userId: candidate.userId,
+        username: candidate.username,
+        genome: candidate.genome!,
+        appearance: candidate.appearance,
+      })),
+      now,
+      generateTrack(room.track),
+    );
+    room.status = 'COUNTDOWN';
+    return { state: this.publicState(room), startAt: room.race.startAt };
+  }
+
+  async startWithAppearances(
+    socketId: string,
+    load: (ids: string[]) => Promise<ReadonlyMap<string, VehicleAppearance>>,
+  ): Promise<{ state: PublicRoomState; startAt: number }> {
+    const room = this.requireStartableRoom(socketId);
+    const roster = [...room.players.values()];
+    const appearances = await load(roster.map((player) => player.userId));
+    const current = this.requireStartableRoom(socketId);
+    if (
+      current !== room ||
+      current.players.size !== roster.length ||
+      roster.some((player) => current.players.get(player.userId) !== player)
+    ) {
+      throw new RoomError(
+        'ROOM_CHANGED',
+        'La sala cambió mientras se preparaba la carrera',
+      );
+    }
+    for (const player of roster)
+      player.appearance = {
+        ...(appearances.get(player.userId) ?? defaultAppearance),
+      };
+    return this.start(socketId);
+  }
+
+  private requireStartableRoom(socketId: string): Room {
+    const { room, player } = this.requireMembership(socketId);
+    if (room.hostUserId !== player.userId) {
+      throw new RoomError('HOST_REQUIRED', 'Only the host can start the race');
+    }
+    if (room.status !== 'LOBBY') {
+      throw new RoomError('INVALID_STATE', 'Race is not in lobby');
+    }
+    if (room.players.size < 2) {
+      throw new RoomError(
+        'PLAYERS_REQUIRED',
+        'At least two players are required',
+      );
+    }
+    if ([...room.players.values()].some((candidate) => !candidate.ready)) {
+      throw new RoomError('NOT_READY', 'Every player must be ready');
+    }
+    const players = [...room.players.values()];
+    if (players.some((candidate) => !candidate.genome)) {
+      throw new RoomError('GENOME_REQUIRED', 'Every player needs a genome');
+    }
+    return room;
+  }
+
+  setTimeScale(socketId: string, timeScale: number): PublicRoomState {
+    const { room, player } = this.requireMembership(socketId);
+    if (room.hostUserId !== player.userId) {
+      throw new RoomError(
+        'HOST_REQUIRED',
+        'Solo el anfitrión puede cambiar la velocidad',
+      );
+    }
+    if (![1, 2, 4].includes(timeScale)) {
+      throw new RoomError('INVALID_SPEED', 'La velocidad debe ser 1, 2 o 4');
+    }
+    room.timeScale = timeScale;
+    return this.publicState(room);
+  }
+
+  eliminateCar(socketId: string, targetUserId: string, startAt: number): void {
+    const { room, player } = this.requireMembership(socketId);
+    if (room.hostUserId !== player.userId) {
+      throw new RoomError(
+        'HOST_REQUIRED',
+        'Solo el anfitrión puede eliminar autos',
+      );
+    }
+    if (room.status !== 'RACING' || !room.race) {
+      throw new RoomError(
+        'INVALID_STATE',
+        'Solo puedes eliminar autos durante la carrera',
+      );
+    }
+    if (room.race.startAt !== startAt) {
+      throw new RoomError('STALE_RACE', 'Esta acción pertenece a otra carrera');
+    }
+    if (!room.players.has(targetUserId) || !room.race.eliminate(targetUserId)) {
+      throw new RoomError(
+        'PLAYER_NOT_ACTIVE',
+        'Este auto ya no está activo en la carrera',
+      );
+    }
+  }
+
+  submitInput(socketId: string, input: RaceInput): boolean {
+    const { room, player } = this.requireMembership(socketId);
+    if (!room.race) return false;
+    return room.race.submitInput(player.userId, input);
+  }
+
+  roomCodeForSocket(socketId: string): string | undefined {
+    return this.roomBySocket.get(socketId);
+  }
+
+  tick(now = Date.now()): RoomTickUpdate[] {
+    const updates: RoomTickUpdate[] = [];
+    for (const room of this.rooms.values()) {
+      if (!room.race) continue;
+      const snapshot = room.race.tick(now, room.timeScale);
+      room.status = snapshot.status;
+      const result = room.race.result();
+      if (result) {
+        room.race = undefined;
+        room.status = 'LOBBY';
+        for (const player of room.players.values()) player.ready = false;
+      }
+      updates.push({
+        code: room.code,
+        state: this.publicState(room),
+        snapshot,
+        result,
+      });
+    }
+    return updates;
+  }
+
+  private ensureAvailable(userId: string): void {
+    if (this.roomByUser.has(userId)) {
+      throw new RoomError('ALREADY_IN_ROOM', 'Leave the current room first');
+    }
+  }
+
+  private requireMembership(socketId: string): {
+    room: Room;
+    player: RoomPlayer;
+  } {
+    const code = this.roomBySocket.get(socketId);
+    const room = code ? this.rooms.get(code) : undefined;
+    const player = room
+      ? [...room.players.values()].find(
+          (candidate) => candidate.socketId === socketId,
+        )
+      : undefined;
+    if (!room || !player)
+      throw new RoomError('NOT_IN_ROOM', 'Join a room first');
+    return { room, player };
+  }
+
+  private indexPlayer(player: RoomPlayer, code: string): void {
+    this.roomBySocket.set(player.socketId, code);
+    this.roomByUser.set(player.userId, code);
+  }
+
+  private createCode(): string {
+    const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    let code = '';
+    do {
+      const bytes = randomBytes(6);
+      code = [...bytes]
+        .map((value) => alphabet[value % alphabet.length])
+        .join('');
+    } while (this.rooms.has(code));
+    return code;
+  }
+
+  private createTrackRecipe(): TrackRecipe {
+    return {
+      version: 'grand-prix-v3',
+      seed: randomBytes(4).readUInt32LE() & 0x7fffffff,
+    };
+  }
+
+  private publicState(room: Room): PublicRoomState {
+    return {
+      code: room.code,
+      hostUserId: room.hostUserId,
+      timeScale: room.timeScale,
+      status: room.status,
+      maxPlayers: room.maxPlayers,
+      track: room.track,
+      players: [...room.players.values()].map((player) => ({
+        userId: player.userId,
+        username: player.username,
+        ready: player.ready,
+        genomeName: player.genomeName,
+        appearance: { ...player.appearance },
+      })),
+    };
+  }
+}
