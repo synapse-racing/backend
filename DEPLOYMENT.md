@@ -4,7 +4,7 @@ El backend requiere MongoDB con replica set para guardar checkpoint, metrica y r
 
 ## Variables
 
-Copia `.env.production.example` a `.env.production` (Compose) o configura `.env` (Pterodactyl). Define `DATABASE_URL`, secretos JWT distintos y el origen del frontend. No guardes credenciales en Git.
+Copia `.env.production.example` a `.env.production` (Compose) o configura `.env` (Pterodactyl). Define `DATABASE_URL`, secretos JWT distintos y el origen del frontend. En modo distribuido añade `REDIS_URL` en cada servicio. No guardes credenciales en Git.
 
 ```text
 DATABASE_URL=mongodb://USER:PASSWORD@mongo.example.com:27017/synapse?authSource=admin&replicaSet=rs0&directConnection=true
@@ -14,18 +14,24 @@ Codifica usuario y clave como componentes URI. Ajusta `authSource` a la base don
 
 ## Docker Compose
 
-`compose.yaml` incluye un replica set de desarrollo sin autenticacion, publicado solo en localhost. No expongas ese servicio de desarrollo a Internet. `compose.prod.yaml` usa tu MongoDB externo y publica solo el frontend.
+`compose.yaml` incluye un replica set de desarrollo sin autenticacion, publicado solo en localhost. No expongas ese servicio de desarrollo a Internet. `compose.prod.yaml` usa tu MongoDB externo y publica solo el frontend. `compose.dist.yaml` despliega el modo distribuido: Mongo local, Redis y los servicios `core-api` (:3001) y `multiplayer` (:3002).
 
 ```bash
 docker compose --env-file .env.production -f compose.prod.yaml config
 docker compose --env-file .env.production -f compose.prod.yaml up -d --build --wait
 ```
 
-El entrypoint ejecuta `prisma db push --skip-generate`, sin `--accept-data-loss` ni reinicios de base. Si falla la preparacion de indices, no inicia la API. Cambios destructivos futuros requieren un procedimiento especifico revisado por separado.
+El entrypoint ejecuta `prisma db push --skip-generate`, sin `--accept-data-loss` ni reinicios de base. Si falla la preparacion de indices, no inicia la API. El servicio multiplayer no ejecuta migraciones: las salas viven en memoria. Cambios destructivos futuros requieren un procedimiento especifico revisado por separado.
+
+### Modo distribuido
+
+Con `compose.dist.yaml` ambos servicios comparten Mongo, Redis y los secretos JWT. Configura el proxy inverso del host para enrutar `/api/*` hacia `core-api` y `/socket.io/*` hacia `multiplayer`; compose publica ambos puertos solo en 127.0.0.1. `REDIS_URL` ya apunta al Redis del compose; sin el bus, los eventos entre servicios (como expulsar autos al cerrar sesion) no se propagan entre procesos.
 
 ## Pterodactyl del backend
 
 Importa `deploy/pterodactyl/egg-synapse-mongodb.json`. Copia `start-pterodactyl.sh` a `/home/container/start-pterodactyl.sh`, sube codigo y lockfile, y configura `.env`. El script instala dependencias, genera Prisma, compila y prepara los indices antes de iniciar NestJS.
+
+Define `SYNAPSE_APP` con el servicio a ejecutar: `api` (monolito, valor por defecto), `core-api` (solo REST) o `multiplayer` (solo Socket.IO). `api` y `core-api` aplican el esquema al arrancar; `multiplayer` arranca sin tocar la base. Si ejecutas `core-api` y `multiplayer` en servidores separados, vuelve a subir el repo completo en ambos y apunta ambos a las mismas bases y secretos JWT.
 
 Para habilitar el replica set del servidor de MongoDB consulta [PTERODACTYL-MONGODB.md](deploy/pterodactyl/PTERODACTYL-MONGODB.md). No ejecutes el backend nuevo contra un MongoDB standalone.
 
@@ -51,14 +57,13 @@ Descarga la rama `migration/mongodb`, no `main`. Extrae el ZIP y sube el conteni
   package.json
   pnpm-lock.yaml
   pnpm-workspace.yaml
-  nest-cli.json
   tsconfig.json
-  tsconfig.build.json
   start-pterodactyl.sh
-  src/
+  apps/
+  libs/
   prisma/schema.prisma
 ```
 
-No mezcles `src/` de una version con `prisma/` de otra. El schema activo debe indicar `provider = "mongodb"`. No subas `node_modules`, `dist` ni archivos `.tsbuildinfo` del equipo local; se generan en el servidor. Conserva tu `.env` privado.
+No mezcles `apps/` o `libs/` de una version con `prisma/` de otra. El schema activo debe indicar `provider = "mongodb"`. No subas `node_modules`, `dist` ni archivos `.tsbuildinfo` del equipo local; se generan en el servidor. Conserva tu `.env` privado.
 
 Un error de compilacion que menciona `synapse-backend-main/src/...`, combinado con `$runCommandRaw` inexistente o `bestGenome: null` incompatible, indica que se estan mezclando fuentes y un cliente Prisma relacional. La compilacion ahora incluye solo el directorio raiz `src/`, y el arranque comprueba el schema antes de instalar o generar Prisma. Esto detecta una subida incompleta; no reemplaza los archivos del despliegue automaticamente.

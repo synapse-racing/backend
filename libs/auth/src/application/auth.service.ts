@@ -5,6 +5,7 @@ import * as argon2 from 'argon2';
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '@synapse/database';
 import { PublicUser, UsersService } from '@synapse/users';
+import { BUS_EVENTS, synapseBus } from '@synapse/platform';
 import {
   AccessTokenPayload,
   RefreshTokenPayload,
@@ -78,10 +79,16 @@ export class AuthService {
 
     try {
       const payload = await this.verifyRefreshToken(refreshToken);
-      await this.prisma.refreshSession.updateMany({
+      const revoked = await this.prisma.refreshSession.updateMany({
         where: { id: payload.sid, userId: payload.sub, revokedAt: null },
         data: { revokedAt: new Date() },
       });
+      if (revoked.count > 0) {
+        synapseBus.publish(BUS_EVENTS.sessionLogout, {
+          userId: payload.sub,
+          sessionId: payload.sid,
+        });
+      }
     } catch {
       // Logout remains idempotent even when the cookie is stale or malformed.
     }

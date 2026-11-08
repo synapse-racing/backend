@@ -415,3 +415,53 @@ describe('race appearance snapshots', () => {
     expect(load).not.toHaveBeenCalled();
   });
 });
+
+describe('RoomService kickUser', () => {
+  it('removes the player from the room and reports their socket', () => {
+    const service = new RoomService();
+    const created = service.create(
+      { id: 'host', username: 'Host' },
+      'socket-host',
+      2,
+    );
+    service.join(
+      created.code,
+      { id: 'guest', username: 'Guest' },
+      'socket-guest',
+    );
+
+    const kicked = service.kickUser('guest');
+    expect(kicked).toHaveLength(1);
+    expect(kicked[0].code).toBe(created.code);
+    expect(kicked[0].socketId).toBe('socket-guest');
+    expect(kicked[0].state?.players.map((player) => player.userId)).toEqual([
+      'host',
+    ]);
+    expect(service.kickUser('guest')).toEqual([]);
+  });
+
+  it('removes the host, transfers leadership and can delete the room', () => {
+    const service = new RoomService();
+    const created = service.create(
+      { id: 'host', username: 'Host' },
+      'socket-host',
+      2,
+    );
+    service.join(
+      created.code,
+      { id: 'guest', username: 'Guest' },
+      'socket-guest',
+    );
+
+    const [kicked] = service.kickUser('host');
+    expect(kicked.state?.hostUserId).toBe('guest');
+
+    service.kickUser('guest');
+    expect(service.roomCodeForSocket('socket-host')).toBeUndefined();
+  });
+
+  it('returns empty results for unknown users', () => {
+    const service = new RoomService();
+    expect(service.kickUser('unknown')).toEqual([]);
+  });
+});

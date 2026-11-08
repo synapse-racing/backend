@@ -310,6 +310,24 @@ export class RoomService {
     return this.roomBySocket.get(socketId);
   }
 
+  kickUser(
+    userId: string,
+  ): Array<{ code: string; socketId: string; state: PublicRoomState | null }> {
+    const code = this.roomByUser.get(userId);
+    if (!code) return [];
+    const room = this.rooms.get(code);
+    const player = room
+      ? [...room.players.values()].find(
+          (candidate) => candidate.userId === userId,
+        )
+      : undefined;
+    if (!player) return [];
+    const socketId = player.socketId;
+    const result = this.leave(socketId);
+    if (!result) return [];
+    return [{ code: result.code, socketId, state: result.state }];
+  }
+
   tick(now = Date.now()): RoomTickUpdate[] {
     const updates: RoomTickUpdate[] = [];
     for (const room of this.rooms.values()) {

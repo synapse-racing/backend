@@ -19,6 +19,7 @@
     "class-validator": "^0.15.1",
     "@synapse/auth": "workspace:*",
     "@synapse/domain": "workspace:*",
+    "@synapse/platform": "workspace:*",
     "@synapse/training": "workspace:*",
     "@synapse/users": "workspace:*"
   }

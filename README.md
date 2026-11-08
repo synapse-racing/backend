@@ -50,6 +50,7 @@ cp .env.example .env
 | `JWT_REFRESH_SECRET` | At least 32 characters, different from the access secret |
 | `JWT_ACCESS_TTL_SECONDS` | Access token lifetime in seconds (default `900`) |
 | `JWT_REFRESH_TTL_DAYS` | Refresh token lifetime in days (default `30`) |
+| `REDIS_URL` | Optional; enables the Redis event bus across services |
 
 ## Database Setup
 
@@ -82,8 +83,15 @@ Full example documents are available in [`docs/mongodb-examples.json`](docs/mong
 ## Running
 
 ```bash
-pnpm start:dev   # Development (watch mode)
-pnpm start:prod  # Production (compiled dist)
+pnpm dev:api        # Development (watch mode): monolithic API on :3000
+pnpm start          # Production: compiled apps/api/dist/main.js
+```
+
+Each app can also run standalone:
+
+```bash
+pnpm dev:core-api   # REST service (auth, users, garage, training) on :3001
+pnpm dev:multiplayer # Socket.IO race service on :3002
 ```
 
 | Endpoint | URL |
@@ -156,34 +164,44 @@ The server runs the physics simulation at 20 Hz. Rooms are ephemeral and live in
 
 ## Project Structure
 
+pnpm workspace: `apps/` are deployable services, `libs/` is shared NestJS code imported as `@synapse/*`.
+
 ```
-src/
-├── config/               # Environment variable validation
-├── infrastructure/
-│   └── database/         # Prisma service and connection management
-└── modules/
-    ├── auth/             # JWT auth, refresh session management
-    │   ├── application/  # Use cases (register, login, refresh, logout)
-    │   ├── domain/       # Auth entities and port interfaces
-    │   ├── infrastructure/  # Guards, token strategies
-    │   └── presentation/ # Auth controller, DTOs
-    ├── multiplayer/      # Socket.IO gateway, rooms, authoritative simulation
-    ├── training/         # Training run and checkpoint CRUD
-    └── users/            # User service and appearance persistence
+apps/
+├── api/              # Monolithic backend: REST + Socket.IO (this is the default deploy)
+├── core-api/         # Stateless REST service: auth, users, garage, training
+└── multiplayer/      # Stateful Socket.IO race service
+libs/
+├── platform/         # Shared bootstrap, health endpoints, env validation, Redis event bus
+├── database/         # PrismaService and DatabaseModule
+├── domain/           # Race simulation contract shared with the frontend (race parity)
+├── auth/             # JWT auth, refresh sessions, guards
+├── users/            # User service
+├── garage/           # Vehicle appearance persistence
+├── training/         # Training run and checkpoint CRUD
+└── rooms/            # In-memory rooms and the Socket.IO gateway
 ```
+
+## Distributed mode
+
+Splitting the backend into `core-api` and `multiplayer` requires a Redis instance for the event bus: set `REDIS_URL` (for example `redis://redis:6379`) in every service. Events currently keep logout in sync: when a session is revoked in `core-api`, the multiplayer service removes that player's cars from any room. Without `REDIS_URL` each isolated instance still works; deploy them as one process (`apps/api`) when you want identical multiplayer behavior to the monolith.
+
+| Service | Port | Talk at | Notes |
+|---|---|---|---|
+| `core-api` | 3001 | `/api/auth`, `/api/users`, `/api/training-runs` | Needs MongoDB; pushes the schema on boot |
+| `multiplayer` | 3002 | `/socket.io` (namespace `/multiplayer`) | Rooms are in memory; no schema push |
 
 ## Scripts
 
 | Command | Description |
 |---|---|
-| `pnpm start:dev` | Start in watch mode |
-| `pnpm start:prod` | Start compiled production build |
-| `pnpm build` | Compile TypeScript to `dist/` |
+| `pnpm build` | Build every app and lib (`build:api`, `build:core-api`, `build:multiplayer` for a single app) |
+| `pnpm start` | Run the built monolithic API (`start:core-api`, `start:multiplayer` for the split services) |
+| `pnpm dev:api` | Monolithic API in watch mode (`dev:core-api`, `dev:multiplayer` for the split services) |
 | `pnpm lint` | Run ESLint |
 | `pnpm lint:fix` | Auto-fix lint errors |
-| `pnpm test` | Run Jest unit tests |
+| `pnpm test` | Run Jest unit tests per package |
 | `pnpm test:e2e` | Run end-to-end tests (spins up an in-memory MongoDB replica set) |
-| `pnpm test:cov` | Run unit tests with coverage |
 | `pnpm prisma:generate` | Generate Prisma Client |
 | `pnpm db:push` | Push schema to the database and create indexes |
 | `pnpm db:studio` | Open Prisma Studio |
@@ -192,22 +210,30 @@ src/
 
 ## Docker
 
-A `Dockerfile` and two Compose files are included:
+A single `Dockerfile` builds all three services; choose with `--build-arg APP`:
 
 | File | Purpose |
 |---|---|
-| `compose.yaml` | Local development stack (MongoDB replica set + backend) |
-| `compose.prod.yaml` | Production stack (external MongoDB + frontend) |
+| `compose.yaml` | Local development stack (MongoDB replica set + monolith) |
+| `compose.prod.yaml` | Production stack (monolith + frontend) |
+| `compose.dist.yaml` | Distributed stack (Mongo + Redis + core-api + multiplayer) |
 
 ```bash
 # Development
 docker compose up -d
 
-# Production
+# Monolith production image
 docker compose --env-file .env.production -f compose.prod.yaml up -d --build --wait
+
+# Individual service images
+docker build --build-arg APP=core-api --tag synapse-core-api .
+docker build --build-arg APP=multiplayer --tag synapse-multiplayer .
+
+# Distributed stack
+docker compose --env-file .env.production -f compose.dist.yaml up -d --build --wait
 ```
 
-The Docker entrypoint runs `prisma db push --skip-generate` before starting the API. If index creation fails, the API will not start.
+The Docker entrypoint runs `prisma db push --skip-generate` before starting any REST app; the multiplayer service starts directly since rooms are in memory. If index creation fails, the API will not start.
 
 See [DEPLOYMENT.md](./DEPLOYMENT.md) for full instructions on TLS termination, Pterodactyl hosting, backups, and production environment variables.
 

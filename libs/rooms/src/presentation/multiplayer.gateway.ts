@@ -19,6 +19,11 @@ import { Server, Socket } from 'socket.io';
 import { UsersService, type PublicUser } from '@synapse/users';
 import { TrainingService } from '@synapse/training';
 import { RoomError, RoomService } from '../application/room.service';
+import {
+  BUS_EVENTS,
+  type SessionLogoutEvent,
+  synapseBus,
+} from '@synapse/platform';
 import type { AccessTokenPayload } from '@synapse/auth';
 import type {
   PublicRoomState,
@@ -107,6 +112,7 @@ export class MultiplayerGateway
   server!: Server;
 
   private timer?: ReturnType<typeof setInterval>;
+  private unsubscribeLogout?: () => void;
 
   constructor(
     private readonly configService: ConfigService,
@@ -118,10 +124,26 @@ export class MultiplayerGateway
 
   onModuleInit(): void {
     this.timer = setInterval(() => this.tick(), 50);
+    // Remove a player's cars from rooms when their session is logged out in
+    // the API service. No-op without REDIS_URL (monolith keeps shared memory).
+    this.unsubscribeLogout = synapseBus.subscribe(
+      BUS_EVENTS.sessionLogout,
+      (payload: SessionLogoutEvent) => {
+        for (const kicked of this.roomService.kickUser(payload.userId)) {
+          this.server.in(kicked.socketId).disconnectSockets(true);
+          if (kicked.state) {
+            this.server
+              .to(this.roomName(kicked.code))
+              .emit('room:state', kicked.state);
+          }
+        }
+      },
+    );
   }
 
   onModuleDestroy(): void {
     if (this.timer) clearInterval(this.timer);
+    this.unsubscribeLogout?.();
   }
 
   async handleConnection(client: MultiplayerSocket): Promise<void> {
