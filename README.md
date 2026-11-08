@@ -222,15 +222,13 @@ A single `Dockerfile` builds all three services; choose with `--build-arg APP`:
 # Development
 docker compose up -d
 
-# Monolith production image
-docker compose --env-file .env.production -f compose.prod.yaml up -d --build --wait
+# Production (monolith and distributed stacks)
+docker compose --env-file .env -f compose.prod.yaml up -d --build --wait
+docker compose --env-file .env -f compose.dist.yaml up -d --build --wait
 
 # Individual service images
 docker build --build-arg APP=core-api --tag synapse-core-api .
 docker build --build-arg APP=multiplayer --tag synapse-multiplayer .
-
-# Distributed stack
-docker compose --env-file .env.production -f compose.dist.yaml up -d --build --wait
 ```
 
 The Docker entrypoint runs `prisma db push --skip-generate` before starting any REST app; the multiplayer service starts directly since rooms are in memory. If index creation fails, the API will not start.

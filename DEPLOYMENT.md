@@ -4,7 +4,7 @@ El backend requiere MongoDB con replica set para guardar checkpoint, metrica y r
 
 ## Variables
 
-Copia `.env.production.example` a `.env.production` (Compose) o configura `.env` (Pterodactyl). Define `DATABASE_URL`, secretos JWT distintos y el origen del frontend. En modo distribuido añade `REDIS_URL` en cada servicio. No guardes credenciales en Git.
+Usa `.env.example` como plantilla única: cópiala a `.env` (Pterodactyl) o pásla a Compose con `--env-file .env`. Define `DATABASE_URL`, secretos JWT distintos, el origen del frontend y, en modo distribuido, `REDIS_URL` en cada servicio. No guardes credenciales en Git.
 
 ```text
 DATABASE_URL=mongodb://USER:PASSWORD@mongo.example.com:27017/synapse?authSource=admin&replicaSet=rs0&directConnection=true
@@ -17,8 +17,8 @@ Codifica usuario y clave como componentes URI. Ajusta `authSource` a la base don
 `compose.yaml` incluye un replica set de desarrollo sin autenticacion, publicado solo en localhost. No expongas ese servicio de desarrollo a Internet. `compose.prod.yaml` usa tu MongoDB externo y publica solo el frontend. `compose.dist.yaml` despliega el modo distribuido: Mongo local, Redis y los servicios `core-api` (:3001) y `multiplayer` (:3002).
 
 ```bash
-docker compose --env-file .env.production -f compose.prod.yaml config
-docker compose --env-file .env.production -f compose.prod.yaml up -d --build --wait
+docker compose --env-file .env -f compose.prod.yaml config
+docker compose --env-file .env -f compose.prod.yaml up -d --build --wait
 ```
 
 El entrypoint ejecuta `prisma db push --skip-generate`, sin `--accept-data-loss` ni reinicios de base. Si falla la preparacion de indices, no inicia la API. El servicio multiplayer no ejecuta migraciones: las salas viven en memoria. Cambios destructivos futuros requieren un procedimiento especifico revisado por separado.
@@ -37,7 +37,7 @@ Para habilitar el replica set del servidor de MongoDB consulta [PTERODACTYL-MONG
 
 ## Documentación Swagger
 
-Swagger está disponible en /api/docs y su esquema JSON en /api/docs-json. Por defecto se deshabilita en producción. Para habilitarlo explícitamente, añade SWAGGER_ENABLED=true a .env (Pterodactyl) o .env.production (Compose) y reinicia el backend. Para desactivarlo, usa false. Solo se aceptan true y false.
+Swagger está disponible en /api/docs y su esquema JSON en /api/docs-json. Por defecto se deshabilita en producción. Para habilitarlo explícitamente, cambia SWAGGER_ENABLED=true en tu `.env` y reinicia el backend. Para desactivarlo, usa false. Solo se aceptan true y false. La plantilla lo trae desactivado para no exponer la documentación accidentalmente en producción.
 
 El script de Pterodactyl mantiene NODE_ENV=production; no es necesario cambiarlo. La variable de Swagger se carga por separado. Las variables configuradas en el panel tienen prioridad sobre .env: evita definir valores contradictorios en ambos sitios. La documentación no elimina la autenticación de los endpoints; utiliza Authorize con un access token para probar rutas protegidas.
 

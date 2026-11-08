@@ -37,7 +37,7 @@ Monorepo pnpm: `apps/` (servicios desplegables) y `libs/` (código compartido po
 - Cambios en REST o Socket.IO deben revisar DTO, serialización, Swagger cuando aplique y tipos del frontend.
 - Conserva códigos de error estables y no envíes trazas, secretos ni detalles internos. El frontend traduce los errores conocidos y muestra referencias en español; coordina cambios de códigos con su catálogo.
 - No agregues dependencias ni refactorizaciones ajenas a la tarea. No sustituyas persistencia o versiones de simulación como parte de una limpieza.
-- Nuevos eventos, variables de la ejecución o apps deben quedar en .env.example y .env.production.example cuando aplique.
+- Nuevos eventos, variables de la ejecución o apps deben quedar en .env.example cuando aplique.
 
 ## Invariantes del juego
 
@@ -53,11 +53,11 @@ Monorepo pnpm: `apps/` (servicios desplegables) y `libs/` (código compartido po
 
 - JWT de acceso y cookie HttpOnly para renovación; contraseñas y tokens de renovación con hash. No registres tokens, cookies ni contraseñas.
 - Sesiones simultáneas permitidas. Cerrar sesión revoca la sesión correspondiente; no reintroduzcas bloqueos globales ni por cuenta o IP sin solicitud explícita.
-- No leas ni publiques .env para documentar configuración. Usa .env.example y .env.production.example; FRONTEND_URL requiere origen completo, con protocolo y puerto cuando aplique. REDIS_URL es opcional y activa el bus Redis entre servicios.
+- No leas ni publiques .env para documentar configuración. Usa .env.example como única plantilla (cópiala a .env); FRONTEND_URL requiere origen completo, con protocolo y puerto cuando aplique. REDIS_URL es opcional y activa el bus Redis entre servicios.
 - Sin REDIS_URL cada servicio vive aislado y comparte estado solo si es el mismo proceso (monolito). No prometas sincronización entre procesos sin Redis.
 - Conserva bases locales, copias de seguridad y volúmenes. No ejecutes reset, --accept-data-loss, limpieza de colecciones o cambios contra producción como comprobación rutinaria.
 - MongoDB requiere replica set para transacciones. El esquema se sincroniza con Prisma db push; Prisma Migrate no se utiliza con este proveedor.
-- No ejecutes db:push/db:deploy sin conocer el destino. Nunca uses la base del usuario para E2E.
+- No ejecutes db:push sin conocer el destino. Nunca uses la base del usuario para E2E.
 - Mantén arranque no interactivo para Docker/Pterodactyl, PORT configurable y escucha en 0.0.0.0. No hardcodees hosts ni credenciales del hosting.
 
 ## Comprobación y entrega

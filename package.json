@@ -22,7 +22,6 @@
     "lint": "pnpm build:libs && eslint \"{apps,libs,test}/**/*.ts\"",
     "lint:fix": "pnpm lint --fix",
     "prisma:generate": "prisma generate",
-    "db:deploy": "prisma db push",
     "db:push": "prisma db push",
     "db:studio": "prisma studio",
     "test": "pnpm build:libs && pnpm -r run test",
