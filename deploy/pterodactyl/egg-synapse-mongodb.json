@@ -47,6 +47,16 @@
       "user_editable": false,
       "rules": "required|string|in:true",
       "field_type": "text"
+    },
+    {
+      "name": "Synapse app",
+      "description": "Service this server runs: api (monolith), core-api (REST: auth, users, garage, training) or multiplayer (Socket.IO rooms). Upload the same code to every server and set a different value per server.",
+      "env_variable": "SYNAPSE_APP",
+      "default_value": "api",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "required|string|in:api,core-api,multiplayer",
+      "field_type": "text"
     }
   ]
 }

@@ -27,13 +27,45 @@ El entrypoint ejecuta `prisma db push --skip-generate`, sin `--accept-data-loss`
 
 Con `compose.dist.yaml` ambos servicios comparten Mongo, Redis y los secretos JWT. Configura el proxy inverso del host para enrutar `/api/*` hacia `core-api` y `/socket.io/*` hacia `multiplayer`; compose publica ambos puertos solo en 127.0.0.1. `REDIS_URL` ya apunta al Redis del compose; sin el bus, los eventos entre servicios (como expulsar autos al cerrar sesion) no se propagan entre procesos.
 
-## Pterodactyl del backend
+## Pterodactyl (una app por servidor)
 
-Importa `deploy/pterodactyl/egg-synapse-mongodb.json`. Copia `start-pterodactyl.sh` a `/home/container/start-pterodactyl.sh`, sube codigo y lockfile, y configura `.env`. El script instala dependencias, genera Prisma, compila y prepara los indices antes de iniciar NestJS.
+Importa `deploy/pterodactyl/egg-synapse-mongodb.json`. Copia `start-pterodactyl.sh` a `/home/container/start-pterodactyl.sh`, sube el codigo completo (sin `node_modules` ni `dist`) y configura `.env`. El script instala dependencias, genera Prisma, compila la app y sus libs, prepara los indices y la inicia.
 
-Define `SYNAPSE_APP` con el servicio a ejecutar: `api` (monolito, valor por defecto), `core-api` (solo REST) o `multiplayer` (solo Socket.IO). `api` y `core-api` aplican el esquema al arrancar; `multiplayer` arranca sin tocar la base. Si ejecutas `core-api` y `multiplayer` en servidores separados, vuelve a subir el repo completo en ambos y apunta ambos a las mismas bases y secretos JWT.
+El egg expone la variable de panel `SYNAPSE_APP` para elegir el servicio; no hace falta duplicar repos ni tocar el script:
 
-Para habilitar el replica set del servidor de MongoDB consulta [PTERODACTYL-MONGODB.md](deploy/pterodactyl/PTERODACTYL-MONGODB.md). No ejecutes el backend nuevo contra un MongoDB standalone.
+| Servidor | `SYNAPSE_APP` | Variables imprescindibles | Notas |
+|---|---|---|---|
+| Backend unico | `api` (por defecto) | `DATABASE_URL`, secretos JWT, `FRONTEND_URL` | Monolito completo. La opcion mas simple. |
+| REST | `core-api` | Las mismas + `REDIS_URL` si hay servidor de salas | Aplica el esquema al arrancar. Expone `/api/*`. |
+| Salas | `multiplayer` | Las mismas + `REDIS_URL` si hay servidor REST | No aplica esquema. Expone `/socket.io`. |
+
+Reglas del despliegue distribuido:
+
+- Los servidores comparten la misma `DATABASE_URL` y exactamente los mismos secretos JWT. El de `multiplayer` necesita Mongo porque lee genomas de entrenamientos.
+- `PORT` lo asigna el panel (`SERVER_PORT`); no lo fijes en `.env`.
+- Define el mismo `REDIS_URL` en `core-api` y `multiplayer`. Sin Redis, cerrar sesion no expulsa los autos del jugador de las salas abiertas.
+- El proxy del frontend enruta `/api/*` al servidor REST y `/socket.io/*` al de salas, con upgrade de WebSocket:
+
+```nginx
+location /api/ {
+  proxy_pass http://IP_CORE_API:PUERTO_CORE_API;
+  proxy_set_header Host $host;
+  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+  proxy_set_header X-Forwarded-Proto $scheme;
+}
+
+location /socket.io/ {
+  proxy_pass http://IP_MULTIPLAYER:PUERTO_MULTIPLAYER;
+  proxy_http_version 1.1;
+  proxy_set_header Upgrade $http_upgrade;
+  proxy_set_header Connection "upgrade";
+  proxy_set_header Host $host;
+  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+  proxy_set_header X-Forwarded-Proto $scheme;
+}
+```
+
+Para redesplegar, sube solo el codigo actualizado y reinicia el servidor: el script reinstala, recompila y vuelve a preparar los indices. Conserva siempre tu `.env` privado. Para habilitar el replica set del MongoDB consulta [PTERODACTYL-MONGODB.md](deploy/pterodactyl/PTERODACTYL-MONGODB.md). No ejecutes el backend nuevo contra un MongoDB standalone.
 
 ## Documentación Swagger
 
