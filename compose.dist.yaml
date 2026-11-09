@@ -2,12 +2,16 @@
 # Redis. Composes the images individually; use compose.prod.yaml for the
 # monolithic stack.
 #
-# NOTE: this file does not include a reverse proxy. The host proxy (Nginx,
-# Caddy, Cloudflare tunnel, ...) must route:
+# NOTE: by default this file does not include a reverse proxy. The host proxy
+# (Nginx, Caddy, Cloudflare tunnel, ...) must route:
 #   /api/*      -> core-api:3001
 #   /socket.io/*-> multiplayer:3002   (with sticky sessions disabled; the
 #                                  gateway is stateful per-room, so route all
 #                                  socket traffic to one instance)
+#
+# To serve the SPA from this stack instead, start it with
+#   docker compose -f compose.dist.yaml --profile frontend up -d
+# (requires ../synapse-frontend checked out next to this repo).
 
 name: synapse-dist
 
@@ -87,6 +91,32 @@ services:
     ports:
       - "127.0.0.1:3002:3002"
     stop_grace_period: 30s
+
+  frontend:
+    profiles: ["frontend"]
+    build:
+      context: ../synapse-frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: /api
+    restart: unless-stopped
+    depends_on:
+      core-api:
+        condition: service_started
+      multiplayer:
+        condition: service_started
+    environment:
+      CORE_API_UPSTREAM: core-api:3001
+      MULTIPLAYER_UPSTREAM: multiplayer:3002
+    ports:
+      - "${APP_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    stop_grace_period: 15s
 
 volumes:
   mongo_dist_data:

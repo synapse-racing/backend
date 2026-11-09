@@ -44,7 +44,8 @@ Reglas del despliegue distribuido:
 - Los servidores comparten la misma `DATABASE_URL` y exactamente los mismos secretos JWT. El de `multiplayer` necesita Mongo porque lee genomas de entrenamientos.
 - `PORT` lo asigna el panel (`SERVER_PORT`); no lo fijes en `.env`.
 - Define el mismo `REDIS_URL` en `core-api` y `multiplayer`. Sin Redis, cerrar sesion no expulsa los autos del jugador de las salas abiertas.
-- El proxy del frontend enruta `/api/*` al servidor REST y `/socket.io/*` al de salas, con upgrade de WebSocket:
+- El servidor del frontend sirve el build con la imagen Nginx del repo `synapse-frontend`. Su plantilla sustituye `CORE_API_UPSTREAM` y `MULTIPLAYER_UPSTREAM` al arrancar el contenedor: define en ese servidor el `IP:PUERTO` del servicio REST y del de salas. No hace falta reconstruir la imagen al cambiar de hosts.
+- Si ese servidor no usa la imagen del repo, su proxy debe enrutar `/api/*` al REST y `/socket.io/*` al de salas, con upgrade de WebSocket:
 
 ```nginx
 location /api/ {
