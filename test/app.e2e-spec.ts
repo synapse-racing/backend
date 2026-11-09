@@ -1,16 +1,16 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import request from 'supertest';
-import { AppModule } from './../src/app.module';
-import { configureApp } from './../src/app.setup';
-import { PrismaService } from './../src/infrastructure/database/prisma.service';
+import { AppModule } from '../apps/api/src/app.module';
+import { configureApp } from '@synapse/platform';
+import { PrismaService } from '@synapse/database';
 import { io, type Socket } from 'socket.io-client';
 import {
   defaultAppearance,
   type AppearanceProfile,
   type VehicleAppearance,
-} from '../src/modules/garage/domain/vehicle-appearance';
-import { TrainingService } from '../src/modules/training/application/training.service';
+} from '@synapse/domain';
+import { TrainingService } from '@synapse/training';
 
 interface AuthBody {
   accessToken: string;

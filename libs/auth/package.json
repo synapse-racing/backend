@@ -1,0 +1,21 @@
+{
+  "name": "@synapse/auth",
+  "version": "0.0.0",
+  "private": true,
+  "license": "UNLICENSED",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "jest --config jest.config.json --runInBand"
+  },
+  "dependencies": {
+    "@nestjs/common": "^11.0.1",
+    "@nestjs/config": "^4.0.4",
+    "@nestjs/jwt": "^11.0.2",
+    "argon2": "^0.45.1",
+    "@synapse/database": "workspace:*",
+    "@synapse/platform": "workspace:*",
+    "@synapse/users": "workspace:*"
+  }
+}

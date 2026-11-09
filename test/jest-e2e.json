@@ -7,5 +7,8 @@
   "transform": {
     "^.+\\.(t|j)s$": "ts-jest"
   },
+  "moduleNameMapper": {
+    "^@synapse/([a-z-]+)$": "<rootDir>/../libs/$1/src/index.ts"
+  },
   "testTimeout": 20000
 }

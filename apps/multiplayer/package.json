@@ -1,0 +1,33 @@
+{
+  "name": "@synapse/multiplayer",
+  "version": "0.0.0",
+  "description": "Stateful Synapse service: authoritative multiplayer races over Socket.IO with in-memory rooms.",
+  "private": true,
+  "license": "UNLICENSED",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "tsc-watch -p tsconfig.build.json --onSuccess \"node --enable-source-maps dist/main.js\"",
+    "start": "node dist/main.js"
+  },
+  "dependencies": {
+    "@nestjs/common": "^11.0.1",
+    "@nestjs/config": "^4.0.4",
+    "@nestjs/core": "^11.0.1",
+    "@nestjs/platform-express": "^11.0.1",
+    "@nestjs/platform-socket.io": "^11.2.1",
+    "@nestjs/throttler": "^6.5.0",
+    "socket.io": "^4.8.3",
+    "nestjs-pino": "^4.6.1",
+    "pino": "^10.3.1",
+    "pino-http": "^11.0.0",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.1",
+    "@synapse/auth": "workspace:*",
+    "@synapse/database": "workspace:*",
+    "@synapse/platform": "workspace:*",
+    "@synapse/rooms": "workspace:*",
+    "@synapse/training": "workspace:*",
+    "@synapse/users": "workspace:*"
+  }
+}
