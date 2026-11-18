@@ -6,6 +6,7 @@ import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import {
   AppController,
   AppService,
+  httpLoggerOptions,
   validateEnvironment,
 } from '@synapse/platform';
 import { DatabaseModule } from '@synapse/database';
@@ -21,13 +22,7 @@ import { MultiplayerModule } from '@synapse/rooms';
     LoggerModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (configService: ConfigService) => ({
-        pinoHttp: {
-          level:
-            configService.get<string>('NODE_ENV') === 'production'
-              ? 'info'
-              : 'debug',
-          redact: ['req.headers.authorization', 'req.headers.cookie'],
-        },
+        pinoHttp: httpLoggerOptions(configService.get<string>('NODE_ENV')),
       }),
     }),
     ThrottlerModule.forRoot([

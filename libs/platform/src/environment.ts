@@ -1,4 +1,36 @@
+import { isIP } from 'node:net';
+
 const environments = ['development', 'test', 'production'] as const;
+const exampleSecrets = new Set([
+  'replace-with-an-access-secret-of-at-least-32-characters',
+  'replace-with-a-different-refresh-secret-of-at-least-32-characters',
+  'synapse-local-access-secret-change-me-2026',
+  'synapse-local-refresh-secret-change-me-2026',
+]);
+
+export function parseTrustedProxies(value: unknown): string[] {
+  if (value === undefined || value === '') return [];
+  if (typeof value !== 'string')
+    throw new Error('TRUST_PROXY must be a list of IP addresses or CIDRs');
+  const proxies = value.split(',').map((entry) => entry.trim());
+  for (const entry of proxies) {
+    const [address, prefix, ...extra] = entry.split('/');
+    const family = isIP(address);
+    if (
+      !family ||
+      extra.length ||
+      (prefix !== undefined &&
+        (!/^\d+$/.test(prefix) ||
+          Number(prefix) < 1 ||
+          Number(prefix) > (family === 4 ? 32 : 128)))
+    ) {
+      throw new Error(
+        'TRUST_PROXY must list only trusted proxy IP addresses or CIDRs',
+      );
+    }
+  }
+  return proxies;
+}
 
 function requireUrl(config: Record<string, unknown>, key: string): string {
   const value = config[key];
@@ -62,6 +94,16 @@ export function validateEnvironment(
   }
 
   const frontendUrl = requireUrl(config, 'FRONTEND_URL');
+  const frontend = new URL(frontendUrl);
+  if (
+    frontendUrl !== frontend.origin ||
+    !['http:', 'https:'].includes(frontend.protocol)
+  ) {
+    throw new Error('FRONTEND_URL must be an HTTP(S) origin without a path');
+  }
+  if (nodeEnvironment === 'production' && frontend.protocol !== 'https:') {
+    throw new Error('FRONTEND_URL must use HTTPS in production');
+  }
   const databaseUrl = requireUrl(config, 'DATABASE_URL');
   if (
     !/^mongodb(?:\+srv)?:\/\//.test(databaseUrl) ||
@@ -77,10 +119,19 @@ export function validateEnvironment(
   if (accessSecret === refreshSecret) {
     throw new Error('JWT access and refresh secrets must be different');
   }
+  if (
+    nodeEnvironment === 'production' &&
+    [accessSecret, refreshSecret].some((secret) => exampleSecrets.has(secret))
+  ) {
+    throw new Error(
+      'Replace the example JWT secrets before running in production',
+    );
+  }
 
   return {
     ...config,
     NODE_ENV: nodeEnvironment,
+    TRUST_PROXY: parseTrustedProxies(config.TRUST_PROXY),
     SWAGGER_ENABLED: parseBoolean(
       config.SWAGGER_ENABLED,
       nodeEnvironment !== 'production',

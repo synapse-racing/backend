@@ -4,20 +4,13 @@ import {
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { JwtService } from '@nestjs/jwt';
 import { Request } from 'express';
-import { UsersService } from '@synapse/users';
-import { AccessTokenPayload } from '../domain/auth.types';
+import { AuthService } from '../application/auth.service';
 import { AuthenticatedRequest } from '../presentation/authenticated-request';
 
 @Injectable()
 export class AccessTokenGuard implements CanActivate {
-  constructor(
-    private readonly configService: ConfigService,
-    private readonly jwtService: JwtService,
-    private readonly usersService: UsersService,
-  ) {}
+  constructor(private readonly authService: AuthService) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<Request>();
@@ -26,26 +19,8 @@ export class AccessTokenGuard implements CanActivate {
       throw new UnauthorizedException('Authentication required');
     }
 
-    try {
-      const payload = await this.jwtService.verifyAsync<AccessTokenPayload>(
-        token,
-        {
-          secret: this.configService.getOrThrow<string>('JWT_ACCESS_SECRET'),
-        },
-      );
-      if (payload.type !== 'access' || !payload.sub) {
-        throw new Error('Invalid access payload');
-      }
-
-      const user = await this.usersService.findPublicById(payload.sub);
-      if (!user) {
-        throw new Error('User no longer exists');
-      }
-
-      (request as AuthenticatedRequest).user = user;
-      return true;
-    } catch {
-      throw new UnauthorizedException('Authentication required');
-    }
+    const { user } = await this.authService.authenticateAccessToken(token);
+    (request as AuthenticatedRequest).user = user;
+    return true;
   }
 }

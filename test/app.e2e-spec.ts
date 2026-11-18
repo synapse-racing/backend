@@ -40,6 +40,24 @@ const autonomousGenome = {
   ],
 };
 
+function checkpointSnapshot(seed: number, generation: number) {
+  return {
+    version: 1,
+    seed,
+    generation,
+    config: { populationSize: 1, inputCount: 6, outputCount: 2 },
+    nextGenomeId: 1,
+    randomState: seed,
+    innovations: {
+      nextNode: 9,
+      nextInnovation: 1,
+      connections: [['6->8', 0]],
+      splitNodes: [],
+    },
+    genomes: [autonomousGenome],
+  };
+}
+
 interface ErrorBody {
   message: string;
 }
@@ -229,6 +247,15 @@ describe('AppController (e2e)', () => {
       .post('/api/auth/logout')
       .set('Cookie', rotatedCookie)
       .expect(204);
+
+    await request(server)
+      .get('/api/auth/me')
+      .set('Authorization', `Bearer ${registrationBody.accessToken}`)
+      .expect(401);
+    await request(server)
+      .get('/api/auth/me')
+      .set('Authorization', `Bearer ${(refresh.body as AuthBody).accessToken}`)
+      .expect(401);
 
     await request(server)
       .post('/api/auth/refresh')
@@ -431,18 +458,28 @@ describe('AppController (e2e)', () => {
       .expect(201);
     const trainingRun = creation.body as TrainingRunBody;
 
+    const validCheckpoint = {
+      generation: 1,
+      snapshot: checkpointSnapshot(42170, 1),
+      bestGenome: autonomousGenome,
+      bestFitness: 1250,
+      averageFitness: 420,
+      speciesCount: 2,
+      durationMs: 18000,
+    };
     await request(server)
       .post(`/api/training-runs/${trainingRun.id}/checkpoints`)
       .set('Authorization', `Bearer ${ownerToken}`)
       .send({
-        generation: 1,
+        ...validCheckpoint,
         snapshot: { version: 1, generation: 1, genomes: [] },
-        bestGenome: { id: 'genome-24', nodes: [], connections: [] },
-        bestFitness: 1250,
-        averageFitness: 420,
-        speciesCount: 2,
-        durationMs: 18000,
       })
+      .expect(400);
+
+    await request(server)
+      .post(`/api/training-runs/${trainingRun.id}/checkpoints`)
+      .set('Authorization', `Bearer ${ownerToken}`)
+      .send(validCheckpoint)
       .expect(201)
       .expect((response) => {
         const body = response.body as TrainingRunBody;
@@ -565,8 +602,8 @@ describe('AppController (e2e)', () => {
     const service = app.get(TrainingService);
     const input = (generation: number, fitness: number) => ({
       generation,
-      snapshot: { version: 1, generation },
-      bestGenome: { id: `best-${generation}` },
+      snapshot: checkpointSnapshot(42, generation),
+      bestGenome: { ...autonomousGenome, id: `best-${generation}` },
       bestFitness: fitness,
       averageFitness: 5,
       speciesCount: 2,
@@ -581,7 +618,7 @@ describe('AppController (e2e)', () => {
     });
     expect(saved.currentGeneration).toBe(3);
     expect(saved.bestFitness).toBe(1300);
-    expect(saved.bestGenome).toEqual({ id: 'best-3' });
+    expect(saved.bestGenome).toMatchObject({ id: 'best-3' });
     expect(
       await prisma.generationMetric.count({ where: { trainingRunId: run.id } }),
     ).toBe(2);
@@ -688,6 +725,66 @@ describe('AppController (e2e)', () => {
       ).toBe(true);
     } finally {
       socket.disconnect();
+    }
+  });
+
+  it('rejects an unapproved WebSocket origin and disconnects only the revoked session', async () => {
+    const credentials = {
+      email: 'socket-session@example.com',
+      password: 'secure-pass-123',
+    };
+    const first = await request(app.getHttpServer())
+      .post('/api/auth/register')
+      .send({ ...credentials, username: 'socket_session' })
+      .expect(201);
+    const second = await request(app.getHttpServer())
+      .post('/api/auth/login')
+      .send(credentials)
+      .expect(200);
+    const cookie = (first.headers['set-cookie'] as string[])[0].split(';')[0];
+    await app.listen(0, '127.0.0.1');
+    const url = `${await app.getUrl()}/multiplayer`;
+    const sockets: Socket[] = [];
+    function connect(token: string, origin?: string) {
+      const socket = io(url, {
+        auth: { token },
+        forceNew: true,
+        reconnection: false,
+        transports: ['websocket'],
+        extraHeaders: origin ? { Origin: origin } : undefined,
+      });
+      sockets.push(socket);
+      return socket;
+    }
+    function ready(socket: Socket) {
+      return new Promise<void>((resolve, reject) => {
+        socket.once('connection:ready', () => resolve());
+        socket.once('connect_error', reject);
+      });
+    }
+    try {
+      const firstToken = (first.body as AuthBody).accessToken;
+      await expect(
+        ready(connect(firstToken, 'https://untrusted.example.test')),
+      ).rejects.toBeDefined();
+      const firstSocket = connect(firstToken);
+      const secondSocket = connect((second.body as AuthBody).accessToken);
+      await Promise.all([ready(firstSocket), ready(secondSocket)]);
+      const disconnected = new Promise((resolve) =>
+        firstSocket.once('disconnect', resolve),
+      );
+      await request(app.getHttpServer())
+        .post('/api/auth/logout')
+        .set('Cookie', cookie)
+        .expect(204);
+      await expect(disconnected).resolves.toBe('io server disconnect');
+      expect(secondSocket.connected).toBe(true);
+      await request(app.getHttpServer())
+        .get('/api/auth/me')
+        .set('Authorization', `Bearer ${(second.body as AuthBody).accessToken}`)
+        .expect(200);
+    } finally {
+      for (const socket of sockets) socket.disconnect();
     }
   });
 
@@ -1001,11 +1098,8 @@ describe('AppController (e2e)', () => {
       config,
       generation: 1,
       snapshot: {
-        version: 1,
-        seed: 42,
-        generation: 1,
+        ...checkpointSnapshot(42, 1),
         config,
-        genomes: [autonomousGenome],
       },
       bestGenome: autonomousGenome,
       bestFitness: 100,

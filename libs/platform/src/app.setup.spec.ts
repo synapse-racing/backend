@@ -1,9 +1,10 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, Post } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import request from 'supertest';
 import { configureApp } from './app.setup';
+import { httpLoggerOptions } from './http-security';
 
 @Controller('probe')
 class ProbeController {
@@ -13,34 +14,91 @@ class ProbeController {
   }
 }
 
-describe('Swagger routes', () => {
+@Controller('auth')
+class AuthProbeController {
+  @Post('probe')
+  post() {
+    return { ok: true };
+  }
+}
+
+describe('HTTP security', () => {
   let app: NestExpressApplication;
+
+  async function boot(enabled: boolean, trustedProxies: string[] = []) {
+    const module = await Test.createTestingModule({
+      controllers: [ProbeController, AuthProbeController],
+      providers: [
+        {
+          provide: ConfigService,
+          useValue: new ConfigService({
+            NODE_ENV: 'production',
+            SWAGGER_ENABLED: enabled,
+            FRONTEND_URL: 'https://game.example.com',
+            TRUST_PROXY: trustedProxies,
+          }),
+        },
+      ],
+    }).compile();
+    app = module.createNestApplication<NestExpressApplication>({
+      bodyParser: false,
+    });
+    configureApp(app);
+    return app.init();
+  }
 
   afterEach(async () => {
     await app?.close();
   });
 
+  it('ignores forwarded HTTPS from untrusted peers', async () => {
+    await boot(false);
+    await request(app.getHttpServer())
+      .post('/api/auth/probe')
+      .set('X-Forwarded-Proto', 'https')
+      .expect(403, { statusCode: 403, message: 'Secure connection required' });
+  });
+
+  it('accepts HTTPS from a trusted proxy but rejects an unapproved browser origin', async () => {
+    await boot(false, ['127.0.0.1']);
+    await request(app.getHttpServer())
+      .post('/api/auth/probe')
+      .set('X-Forwarded-Proto', 'https')
+      .set('Origin', 'https://untrusted.example.com')
+      .expect(403, { statusCode: 403, message: 'Forbidden origin' });
+    await request(app.getHttpServer())
+      .post('/api/auth/probe')
+      .set('X-Forwarded-Proto', 'https')
+      .set('Origin', 'https://game.example.com')
+      .expect('Cache-Control', 'no-store')
+      .expect(201);
+  });
+
+  it('keeps only basic request metadata and status in HTTP logs', () => {
+    const { serializers } = httpLoggerOptions('production');
+    const requestLog = {
+      id: 1,
+      method: 'POST',
+      url: '/api/auth/login?private=value',
+      headers: { authorization: 'secret', cookie: 'secret' },
+      body: { password: 'secret' },
+    };
+    const responseLog = {
+      statusCode: 200,
+      headers: { 'set-cookie': 'secret' },
+    };
+    expect(serializers.req(requestLog)).toEqual({
+      id: 1,
+      method: 'POST',
+      url: '/api/auth/login',
+    });
+    expect(serializers.res(responseLog)).toEqual({ statusCode: 200 });
+  });
+
   it.each([true, false])(
     'uses the explicit flag in production: %s',
     async (enabled) => {
-      const module = await Test.createTestingModule({
-        controllers: [ProbeController],
-        providers: [
-          {
-            provide: ConfigService,
-            useValue: new ConfigService({
-              NODE_ENV: 'production',
-              SWAGGER_ENABLED: enabled,
-              FRONTEND_URL: 'http://localhost:5173',
-            }),
-          },
-        ],
-      }).compile();
-      app = module.createNestApplication<NestExpressApplication>({
-        bodyParser: false,
-      });
-      configureApp(app);
-      await app.init();
+      await boot(enabled, ['127.0.0.1']);
       const apiResponse = await request(app.getHttpServer())
         .get('/api/probe')
         .expect(200);

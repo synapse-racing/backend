@@ -30,7 +30,7 @@ Monorepo pnpm: `apps/` (servicios desplegables) y `libs/` (código compartido po
 
 - Mantén el monolito modular y sus capas. Controladores/gateway validan y delegan; servicios de aplicación coordinan; el dominio evita dependencias de transporte y persistencia.
 - Los apps importan libs por `@synapse/*`. Un cambio de dominio o DTO se hace en la lib compartida, no copiado por app. Duplicar lógica rompe la paridad.
-- Los eventos entre servicios se declaran con tipos en el bus (libs/platform/src/bus.ts) y se publican solo a través de él. Sin REDIS_URL el bus es no-op: siempre mantén comportamientos válidos en mono-instancia.
+- Los eventos entre servicios se declaran con tipos en el bus (libs/platform/src/bus.ts) y se publican solo a través de él. Sin REDIS_URL se entregan solo en el mismo proceso.
 - El estado del juego vive en las salas del servicio multiplayer; el REST no escribe salas. El bus solo lleva eventos de sincronización como auth.session.logout.
 - TypeScript estricto, DTO con class-validator y validación de límites en el servidor. No confíes en datos ni permisos enviados por el cliente.
 - Protege acceso por usuario a entrenamientos y apariencia. Los permisos del anfitrión se comprueban en el servidor.

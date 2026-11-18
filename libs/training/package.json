@@ -9,14 +9,14 @@
     "build": "tsc -p tsconfig.build.json"
   },
   "dependencies": {
-    "@nestjs/common": "^11.0.1",
+    "@nestjs/common": "^11.2.10",
     "@nestjs/swagger": "^11.4.7",
-    "@prisma/client": "6.14.0",
-    "class-transformer": "^0.5.1",
-    "class-validator": "^0.15.1",
+    "@prisma/client": "6.19.3",
     "@synapse/auth": "workspace:*",
     "@synapse/database": "workspace:*",
     "@synapse/domain": "workspace:*",
-    "@synapse/users": "workspace:*"
+    "@synapse/users": "workspace:*",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.15.1"
   }
 }

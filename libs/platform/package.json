@@ -10,16 +10,16 @@
     "test": "jest --config jest.config.json --runInBand"
   },
   "dependencies": {
-    "@nestjs/common": "^11.0.1",
+    "@nestjs/common": "^11.2.10",
     "@nestjs/config": "^4.0.4",
-    "@nestjs/platform-express": "^11.0.1",
+    "@nestjs/platform-express": "^11.2.10",
     "@nestjs/swagger": "^11.4.7",
+    "@synapse/database": "workspace:*",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.15.1",
     "cookie-parser": "^1.4.7",
-    "express": "^5.1.0",
+    "express": "^5.3.0",
     "helmet": "^8.3.0",
-    "ioredis": "^5.6.1",
-    "@synapse/database": "workspace:*"
+    "ioredis": "^5.6.1"
   }
 }

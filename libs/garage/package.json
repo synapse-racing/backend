@@ -9,11 +9,11 @@
     "build": "tsc -p tsconfig.build.json"
   },
   "dependencies": {
-    "@nestjs/common": "^11.0.1",
+    "@nestjs/common": "^11.2.10",
     "@nestjs/swagger": "^11.4.7",
-    "class-validator": "^0.15.1",
     "@synapse/auth": "workspace:*",
     "@synapse/domain": "workspace:*",
-    "@synapse/users": "workspace:*"
+    "@synapse/users": "workspace:*",
+    "class-validator": "^0.15.1"
   }
 }

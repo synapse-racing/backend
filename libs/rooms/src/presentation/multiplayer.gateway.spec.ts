@@ -1,7 +1,6 @@
-import { ConfigService } from '@nestjs/config';
-import { JwtService } from '@nestjs/jwt';
-import { Server } from 'socket.io';
+import { AuthService } from '@synapse/auth';
 import { UsersService } from '@synapse/users';
+import { Server } from 'socket.io';
 import { TrainingService } from '@synapse/training';
 import { RoomService } from '../application/room.service';
 import { MultiplayerGateway } from './multiplayer.gateway';
@@ -22,8 +21,7 @@ describe('multiplayer broadcast cadence', () => {
     const tick = jest.fn(() => [update]);
     const emit = jest.fn();
     const gateway = new MultiplayerGateway(
-      {} as ConfigService,
-      {} as JwtService,
+      {} as AuthService,
       { tick } as unknown as RoomService,
       {} as UsersService,
       {} as TrainingService,

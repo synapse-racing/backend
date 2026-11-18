@@ -9,6 +9,6 @@ import { AuthController } from './presentation/auth.controller';
   imports: [JwtModule.register({}), UsersModule],
   controllers: [AuthController],
   providers: [AuthService, AccessTokenGuard],
-  exports: [AccessTokenGuard, JwtModule, UsersModule],
+  exports: [AccessTokenGuard, AuthService, UsersModule],
 })
 export class AuthModule {}

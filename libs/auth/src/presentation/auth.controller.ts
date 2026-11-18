@@ -121,11 +121,12 @@ export class AuthController {
     session: SessionResult,
     response: Response,
   ): AuthResponse {
-    response.cookie(
-      refreshCookieName,
-      session.refreshToken,
-      this.cookieOptions(),
-    );
+    response.cookie(refreshCookieName, session.refreshToken, {
+      ...this.cookieOptions(),
+      maxAge:
+        this.configService.getOrThrow<number>('JWT_REFRESH_TTL_DAYS') *
+        86_400_000,
+    });
     return { accessToken: session.accessToken, user: session.user };
   }
 
@@ -135,12 +136,8 @@ export class AuthController {
   }
 
   private cookieOptions() {
-    const refreshDays = this.configService.getOrThrow<number>(
-      'JWT_REFRESH_TTL_DAYS',
-    );
     return {
       httpOnly: true,
-      maxAge: refreshDays * 86_400_000,
       path: '/api/auth',
       sameSite: 'lax' as const,
       secure:

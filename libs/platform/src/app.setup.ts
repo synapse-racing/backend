@@ -5,6 +5,7 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import type { NextFunction, Request, Response } from 'express';
+import { isAllowedBrowserOrigin } from './http-security';
 
 export function configureApp(app: NestExpressApplication): void {
   const configService = app.get(ConfigService);
@@ -12,11 +13,12 @@ export function configureApp(app: NestExpressApplication): void {
     set: (key: string, value: unknown) => void;
   };
 
-  expressApp.set('trust proxy', 1);
+  expressApp.set(
+    'trust proxy',
+    configService.get<string[]>('TRUST_PROXY') ?? [],
+  );
   app.enableShutdownHooks();
   app.setGlobalPrefix('api');
-  app.useBodyParser('json', { limit: '2mb' });
-  app.useBodyParser('urlencoded', { extended: true, limit: '100kb' });
   const swaggerEnabled = configService.getOrThrow<boolean>('SWAGGER_ENABLED');
   const securityHeaders = helmet();
   const httpDocsHeaders = helmet({
@@ -40,29 +42,38 @@ export function configureApp(app: NestExpressApplication): void {
   app.enableCors({
     credentials: true,
     origin: (origin, callback) => {
-      if (!origin || origin === frontendUrl) {
-        return callback(null, true);
-      }
-      if (nodeEnv !== 'production') {
-        try {
-          const { hostname } = new URL(origin);
-          const isLocalOrLan =
-            hostname === 'localhost' ||
-            hostname === '127.0.0.1' ||
-            hostname.startsWith('192.168.') ||
-            hostname.startsWith('10.') ||
-            /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(hostname);
-
-          if (isLocalOrLan) {
-            return callback(null, true);
-          }
-        } catch {
-          // ignore malformed URLs
-        }
-      }
-      return callback(null, false);
+      callback(null, isAllowedBrowserOrigin(origin, frontendUrl, nodeEnv));
     },
   });
+  app.use((request: Request, response: Response, next: NextFunction) => {
+    const isAuth = /^\/api\/auth(?:\/|$)/i.test(request.path);
+    if (isAuth || request.headers.authorization) {
+      response.setHeader('Cache-Control', 'no-store');
+      const forwardedProto = request.headers['x-forwarded-proto'];
+      if (
+        nodeEnv === 'production' &&
+        (!request.secure ||
+          (forwardedProto !== undefined && forwardedProto !== 'https'))
+      ) {
+        response
+          .status(403)
+          .json({ statusCode: 403, message: 'Secure connection required' });
+        return;
+      }
+    }
+    if (
+      isAuth &&
+      request.method === 'POST' &&
+      !isAllowedBrowserOrigin(request.headers.origin, frontendUrl, nodeEnv)
+    ) {
+      response
+        .status(403)
+        .json({ statusCode: 403, message: 'Forbidden origin' });
+      return;
+    }
+    next();
+  });
+  app.useBodyParser('json', { limit: '2mb' });
   app.useGlobalPipes(
     new ValidationPipe({
       forbidNonWhitelisted: true,

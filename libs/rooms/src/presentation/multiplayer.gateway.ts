@@ -4,8 +4,6 @@ import {
   UsePipes,
   ValidationPipe,
 } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { JwtService } from '@nestjs/jwt';
 import {
   ConnectedSocket,
   MessageBody,
@@ -15,16 +13,19 @@ import {
   WebSocketGateway,
   WebSocketServer,
 } from '@nestjs/websockets';
+import type { IncomingMessage } from 'node:http';
 import { Server, Socket } from 'socket.io';
 import { UsersService, type PublicUser } from '@synapse/users';
 import { TrainingService } from '@synapse/training';
 import { RoomError, RoomService } from '../application/room.service';
 import {
   BUS_EVENTS,
+  isAllowedBrowserOrigin,
+  isSecureWebSocketRequest,
   type SessionLogoutEvent,
   synapseBus,
 } from '@synapse/platform';
-import type { AccessTokenPayload } from '@synapse/auth';
+import { AuthService } from '@synapse/auth';
 import type {
   PublicRoomState,
   RaceInput,
@@ -76,20 +77,31 @@ type MultiplayerSocket = Socket<
   MultiplayerSocketData
 >;
 
+function allowMultiplayerOrigin(origin: string | undefined): boolean {
+  return isAllowedBrowserOrigin(
+    origin,
+    process.env.FRONTEND_URL ?? 'http://localhost:5173',
+    process.env.NODE_ENV,
+  );
+}
+
 @WebSocketGateway({
   namespace: '/multiplayer',
+  allowRequest: (request: IncomingMessage, callback) => {
+    const allowedTransport =
+      process.env.NODE_ENV !== 'production' ||
+      isSecureWebSocketRequest(request);
+    callback(
+      null,
+      allowedTransport && allowMultiplayerOrigin(request.headers.origin),
+    );
+  },
   cors: {
     origin: (
       origin: string | undefined,
       callback: (err: Error | null, allow?: boolean) => void,
     ) => {
-      if (!origin || process.env.NODE_ENV !== 'production') {
-        return callback(null, true);
-      }
-      return callback(
-        null,
-        origin === (process.env.FRONTEND_URL ?? 'http://localhost:5173'),
-      );
+      callback(null, allowMultiplayerOrigin(origin));
     },
     credentials: true,
   },
@@ -115,8 +127,7 @@ export class MultiplayerGateway
   private unsubscribeLogout?: () => void;
 
   constructor(
-    private readonly configService: ConfigService,
-    private readonly jwtService: JwtService,
+    private readonly authService: AuthService,
     private readonly roomService: RoomService,
     private readonly usersService: UsersService,
     private readonly trainingService: TrainingService,
@@ -124,19 +135,12 @@ export class MultiplayerGateway
 
   onModuleInit(): void {
     this.timer = setInterval(() => this.tick(), 50);
-    // Remove a player's cars from rooms when their session is logged out in
-    // the API service. No-op without REDIS_URL (monolith keeps shared memory).
     this.unsubscribeLogout = synapseBus.subscribe(
       BUS_EVENTS.sessionLogout,
       (payload: SessionLogoutEvent) => {
-        for (const kicked of this.roomService.kickUser(payload.userId)) {
-          this.server.in(kicked.socketId).disconnectSockets(true);
-          if (kicked.state) {
-            this.server
-              .to(this.roomName(kicked.code))
-              .emit('room:state', kicked.state);
-          }
-        }
+        this.server
+          .in(this.sessionRoom(payload.sessionId))
+          .disconnectSockets(true);
       },
     );
   }
@@ -152,17 +156,10 @@ export class MultiplayerGateway
       const token = auth.token;
       if (typeof token !== 'string') throw new Error('Missing token');
 
-      const payload = await this.jwtService.verifyAsync<AccessTokenPayload>(
-        token,
-        {
-          secret: this.configService.getOrThrow<string>('JWT_ACCESS_SECRET'),
-        },
-      );
-      if (payload.type !== 'access' || !payload.sub)
-        throw new Error('Invalid token');
-
-      const user = await this.usersService.findPublicById(payload.sub);
-      if (!user) throw new Error('Unknown user');
+      const { user, sessionId } =
+        await this.authService.authenticateAccessToken(token);
+      if (!client.connected) return;
+      await client.join(this.sessionRoom(sessionId));
       client.data.user = user;
       client.emit('connection:ready', { userId: user.id });
     } catch {
@@ -386,5 +383,9 @@ export class MultiplayerGateway
 
   private roomName(code: string): string {
     return `room:${code}`;
+  }
+
+  private sessionRoom(sessionId: string): string {
+    return `session:${sessionId}`;
   }
 }

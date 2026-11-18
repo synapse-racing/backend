@@ -51,6 +51,7 @@ cp .env.example .env
 | `JWT_ACCESS_TTL_SECONDS` | Access token lifetime in seconds (default `900`) |
 | `JWT_REFRESH_TTL_DAYS` | Refresh token lifetime in days (default `30`) |
 | `REDIS_URL` | Optional; enables the Redis event bus across services |
+| `TRUST_PROXY` | Comma-separated IPs or CIDRs of trusted proxies. Empty by default. Set when the proxy terminates TLS. |
 
 ## Database Setup
 
@@ -184,7 +185,7 @@ libs/
 
 ## Distributed mode
 
-Splitting the backend into `core-api` and `multiplayer` requires a Redis instance for the event bus: set `REDIS_URL` (for example `redis://redis:6379`) in every service. Events currently keep logout in sync: when a session is revoked in `core-api`, the multiplayer service removes that player's cars from any room. Without `REDIS_URL` each isolated instance still works; deploy them as one process (`apps/api`) when you want identical multiplayer behavior to the monolith.
+Splitting the backend into `core-api` and `multiplayer` requires a Redis instance for the event bus: set `REDIS_URL` (for example `redis://redis:6379`) in every service. When a session is revoked, multiplayer disconnects only the sockets for that session. Without Redis, logout events are delivered only within the same process.
 
 | Service | Port | Talk at | Notes |
 |---|---|---|---|

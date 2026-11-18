@@ -10,17 +10,17 @@
     "test": "jest --config jest.config.json --runInBand"
   },
   "dependencies": {
-    "@nestjs/common": "^11.0.1",
+    "@nestjs/common": "^11.2.10",
     "@nestjs/config": "^4.0.4",
     "@nestjs/jwt": "^11.0.2",
-    "@nestjs/websockets": "^11.2.1",
-    "socket.io": "^4.8.3",
-    "class-transformer": "^0.5.1",
-    "class-validator": "^0.15.1",
+    "@nestjs/websockets": "^11.2.10",
     "@synapse/auth": "workspace:*",
     "@synapse/domain": "workspace:*",
     "@synapse/platform": "workspace:*",
     "@synapse/training": "workspace:*",
-    "@synapse/users": "workspace:*"
+    "@synapse/users": "workspace:*",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.15.1",
+    "socket.io": "^4.8.4"
   }
 }

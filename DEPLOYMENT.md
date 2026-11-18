@@ -51,7 +51,8 @@ Reglas del despliegue distribuido:
 location /api/ {
   proxy_pass http://IP_CORE_API:PUERTO_CORE_API;
   proxy_set_header Host $host;
-  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+  proxy_set_header X-Forwarded-Host $host;
+  proxy_set_header X-Forwarded-For $remote_addr;
   proxy_set_header X-Forwarded-Proto $scheme;
 }
 
@@ -61,10 +62,15 @@ location /socket.io/ {
   proxy_set_header Upgrade $http_upgrade;
   proxy_set_header Connection "upgrade";
   proxy_set_header Host $host;
-  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+  proxy_set_header X-Forwarded-Host $host;
+  proxy_set_header X-Forwarded-For $remote_addr;
   proxy_set_header X-Forwarded-Proto $scheme;
 }
 ```
+
+En producción, el proxy público debe tener un certificado TLS y enrutar directamente `/api/` y `/socket.io/` a sus servicios desde el bloque HTTPS. Si el proxy y Pterodactyl están en máquinas distintas, conecta sus servicios por una red privada o cifra también ese tramo. Limita el acceso a los puertos internos al proxy. En cada backend, configura `NODE_ENV=production`, `FRONTEND_URL=https://juego.ejemplo.com` sin barra final y `TRUST_PROXY` con la IP del proxy **tal como la ve el servicio** (puede ser la IP del puente Docker). El proxy que termina TLS debe sobrescribir `X-Forwarded-Proto`, `X-Forwarded-For` y `X-Forwarded-Host`; no reenvíes valores enviados por el cliente. El frontend se construye con `VITE_API_URL=/api`. En Compose, el proxy del host puede apuntar al puerto local 3000 del monolito o a 3001/3002 de los servicios separados; la raíz `/` va al frontend.
+
+Los dos servicios deben compartir las claves JWT, pero la clave de acceso y la de renovación deben ser distintas entre sí. Sustituye ambas claves de ejemplo por valores aleatorios. Si estaban publicadas o reutilizadas desde una conversación, rótalas en ambos servicios a la vez; al hacerlo, los jugadores deben volver a iniciar sesión.
 
 Para redesplegar, sube solo el codigo actualizado y reinicia el servidor: el script reinstala, recompila y vuelve a preparar los indices. Conserva siempre tu `.env` privado. Para habilitar el replica set del MongoDB consulta [PTERODACTYL-MONGODB.md](deploy/pterodactyl/PTERODACTYL-MONGODB.md). No ejecutes el backend nuevo contra un MongoDB standalone.
 
@@ -72,7 +78,7 @@ Para redesplegar, sube solo el codigo actualizado y reinicia el servidor: el scr
 
 Swagger está disponible en /api/docs y su esquema JSON en /api/docs-json. Por defecto se deshabilita en producción. Para habilitarlo explícitamente, cambia SWAGGER_ENABLED=true en tu `.env` y reinicia el backend. Para desactivarlo, usa false. Solo se aceptan true y false. La plantilla lo trae desactivado para no exponer la documentación accidentalmente en producción.
 
-El script de Pterodactyl mantiene NODE_ENV=production; no es necesario cambiarlo. La variable de Swagger se carga por separado. Las variables configuradas en el panel tienen prioridad sobre .env: evita definir valores contradictorios en ambos sitios. La documentación no elimina la autenticación de los endpoints; utiliza Authorize con un access token para probar rutas protegidas.
+Configura `NODE_ENV=production` en Pterodactyl. Las variables configuradas en el panel tienen prioridad sobre `.env`: evita valores contradictorios. Abre Swagger por el dominio HTTPS para que sus solicitudes autenticadas funcionen.
 
 ## Verificacion y recuperacion
 

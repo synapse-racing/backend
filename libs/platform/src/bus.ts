@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import Redis from 'ioredis';
 
 const BUS_CHANNEL = 'synapse:events';
@@ -19,6 +20,7 @@ export type BusEventPayload<TEvent extends BusEventType> =
     : Record<string, unknown>;
 
 export interface BusMessage {
+  origin?: string;
   type: string;
   payload: unknown;
   emittedAt: number;
@@ -35,6 +37,7 @@ function resolveUrl(): string | undefined {
 }
 
 class SynapseBus {
+  private readonly origin = randomUUID();
   private publisher?: Redis;
   private subscriber?: Redis;
   private readonly handlers = new Map<string, Set<(payload: never) => void>>();
@@ -43,13 +46,21 @@ class SynapseBus {
     type: TEvent,
     payload: BusEventPayload<TEvent>,
   ): void {
+    this.dispatch(type, payload);
     const url = resolveUrl();
     if (!url) return;
     try {
-      void this.connectPublisher(url).publish(
-        BUS_CHANNEL,
-        JSON.stringify({ type, payload, emittedAt: Date.now() }),
-      );
+      void this.connectPublisher(url)
+        .publish(
+          BUS_CHANNEL,
+          JSON.stringify({
+            type,
+            payload,
+            origin: this.origin,
+            emittedAt: Date.now(),
+          }),
+        )
+        .catch(() => debug(`Synapse event bus publish failed for ${type}`));
     } catch (error) {
       debug(
         `Synapse event bus publish failed for ${type}: ${
@@ -64,10 +75,11 @@ class SynapseBus {
     handler: (payload: BusEventPayload<TEvent>) => void,
   ): () => void {
     const url = resolveUrl();
-    if (!url) return () => undefined;
     this.registerHandler(type, handler);
-    const subscriber = this.connectSubscriber(url);
-    void subscriber.subscribe(BUS_CHANNEL).catch(() => undefined);
+    if (url) {
+      const subscriber = this.connectSubscriber(url);
+      void subscriber.subscribe(BUS_CHANNEL).catch(() => undefined);
+    }
     return () => {
       const handlers = this.handlers.get(type);
       if (!handlers) return;
@@ -84,6 +96,16 @@ class SynapseBus {
     const handlers = this.handlers.get(type) ?? new Set();
     handlers.add(handler);
     this.handlers.set(type, handlers);
+  }
+
+  private dispatch(type: string, payload: unknown): void {
+    for (const handler of this.handlers.get(type) ?? []) {
+      try {
+        handler(payload as never);
+      } catch {
+        debug(`Synapse event bus handler for ${type} failed`);
+      }
+    }
   }
 
   private connectPublisher(url: string): Redis {
@@ -110,16 +132,8 @@ class SynapseBus {
       } catch {
         return;
       }
-      for (const handler of this.handlers.get(parsed.type) ?? []) {
-        try {
-          handler(parsed.payload as never);
-        } catch (error) {
-          debug(
-            `Synapse bus handler for ${parsed.type} failed: ${
-              error instanceof Error ? error.message : error
-            }`,
-          );
-        }
+      if (parsed?.origin !== this.origin && typeof parsed?.type === 'string') {
+        this.dispatch(parsed.type, parsed.payload);
       }
     });
     this.subscriber = subscriber;

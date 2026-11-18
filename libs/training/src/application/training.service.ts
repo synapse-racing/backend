@@ -12,6 +12,10 @@ import { CreateTrainingRunDto } from '../presentation/dto/create-training-run.dt
 import { SaveCheckpointDto } from '../presentation/dto/save-checkpoint.dto';
 import { parseTrackRecipe } from '@synapse/domain';
 import type { TrackRecipe } from '@synapse/domain';
+import {
+  validateCheckpoint,
+  validateTrainingConfig,
+} from './checkpoint-validation';
 
 const trainingSummarySelect = {
   id: true,
@@ -32,6 +36,7 @@ export class TrainingService {
   constructor(private readonly prisma: PrismaService) {}
 
   create(userId: string, input: CreateTrainingRunDto) {
+    validateTrainingConfig(input.config);
     return this.prisma.trainingRun.create({
       data: {
         userId,
@@ -44,15 +49,13 @@ export class TrainingService {
   }
 
   async importGuest(userId: string, input: ImportGuestTrainingDto) {
-    if (
-      input.snapshot.version !== 1 ||
-      input.snapshot.generation !== input.generation ||
-      input.snapshot.seed !== input.seed ||
-      !Array.isArray(input.snapshot.genomes) ||
-      !input.snapshot.genomes.length ||
-      !isDeepStrictEqual(input.snapshot.config, input.config) ||
-      input.snapshot.genomes.length !== input.config.populationSize
-    ) {
+    validateCheckpoint(
+      input.snapshot,
+      input.generation,
+      input.seed,
+      input.bestGenome,
+    );
+    if (!isDeepStrictEqual(input.snapshot.config, input.config)) {
       throw new BadRequestException('Invalid guest training snapshot');
     }
     if (
@@ -62,7 +65,6 @@ export class TrainingService {
     ) {
       throw new BadRequestException('Invalid guest generation metrics');
     }
-    parseTrackRecipe(input.config.track);
     const hash = createHash('sha256')
       .update(JSON.stringify([userId, input.sourceId]))
       .digest('hex');
@@ -217,15 +219,17 @@ export class TrainingService {
   }
 
   async saveCheckpoint(userId: string, id: string, input: SaveCheckpointDto) {
-    if (input.snapshot.version !== 1) {
-      throw new BadRequestException('Unsupported snapshot version');
-    }
-
     return this.prisma.transaction(async (transaction) => {
       const trainingRun = await transaction.trainingRun.findFirst({
         where: { id, userId },
       });
       if (!trainingRun) throw new NotFoundException('Training run not found');
+      validateCheckpoint(
+        input.snapshot,
+        input.generation,
+        trainingRun.seed,
+        input.bestGenome,
+      );
 
       const snapshot = input.snapshot as Prisma.InputJsonValue;
       const bestGenome = input.bestGenome as Prisma.InputJsonValue;

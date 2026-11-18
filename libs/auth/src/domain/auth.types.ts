@@ -2,8 +2,7 @@ import { PublicUser } from '@synapse/users';
 
 export interface AccessTokenPayload {
   sub: string;
-  email: string;
-  username: string;
+  sid: string;
   type: 'access';
 }
 

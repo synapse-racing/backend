@@ -12,6 +12,9 @@ import {
   SessionResult,
 } from '../domain/auth.types';
 
+const missingUserHash =
+  '$argon2id$v=19$m=65536,p=4,t=3$3T7Qpf19FXb9cOFGl3frwg$p2A0Y4YHmdGLUlMk9bCxbuhd+0eZm0yP3rudxGsSAWw';
+
 @Injectable()
 export class AuthService {
   constructor(
@@ -41,7 +44,11 @@ export class AuthService {
     const user = await this.usersService.findByEmailWithPassword(
       email.trim().toLowerCase(),
     );
-    if (!user || !(await argon2.verify(user.passwordHash, password))) {
+    const matches = await argon2.verify(
+      user?.passwordHash ?? missingUserHash,
+      password,
+    );
+    if (!user || !matches) {
       throw new UnauthorizedException('Invalid credentials');
     }
 
@@ -69,34 +76,72 @@ export class AuthService {
       throw new UnauthorizedException('Invalid session');
     }
 
-    return this.createSession(session.user, session.id);
+    return this.createSession(session.user, session);
+  }
+
+  async authenticateAccessToken(
+    token: string,
+  ): Promise<{ user: PublicUser; sessionId: string }> {
+    const payload = await this.jwtService
+      .verifyAsync<AccessTokenPayload>(token, {
+        secret: this.configService.getOrThrow<string>('JWT_ACCESS_SECRET'),
+        algorithms: ['HS256'],
+      })
+      .catch(() => null);
+    if (
+      payload?.type !== 'access' ||
+      typeof payload.sub !== 'string' ||
+      typeof payload.sid !== 'string' ||
+      !payload.sub ||
+      !payload.sid
+    ) {
+      throw new UnauthorizedException('Authentication required');
+    }
+    const session = await this.prisma.refreshSession.findFirst({
+      where: {
+        id: payload.sid,
+        userId: payload.sub,
+        revokedAt: null,
+        expiresAt: { gt: new Date() },
+      },
+      select: {
+        user: {
+          select: {
+            id: true,
+            email: true,
+            username: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+        },
+      },
+    });
+    if (!session?.user)
+      throw new UnauthorizedException('Authentication required');
+    return { user: session.user, sessionId: payload.sid };
   }
 
   async logout(refreshToken: string | undefined): Promise<void> {
-    if (!refreshToken) {
-      return;
-    }
-
-    try {
-      const payload = await this.verifyRefreshToken(refreshToken);
-      const revoked = await this.prisma.refreshSession.updateMany({
-        where: { id: payload.sid, userId: payload.sub, revokedAt: null },
-        data: { revokedAt: new Date() },
+    if (!refreshToken) return;
+    const payload = await this.verifyRefreshToken(refreshToken).catch(
+      () => null,
+    );
+    if (!payload) return;
+    const revoked = await this.prisma.refreshSession.updateMany({
+      where: { id: payload.sid, userId: payload.sub, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+    if (revoked.count > 0) {
+      synapseBus.publish(BUS_EVENTS.sessionLogout, {
+        userId: payload.sub,
+        sessionId: payload.sid,
       });
-      if (revoked.count > 0) {
-        synapseBus.publish(BUS_EVENTS.sessionLogout, {
-          userId: payload.sub,
-          sessionId: payload.sid,
-        });
-      }
-    } catch {
-      // Logout remains idempotent even when the cookie is stale or malformed.
     }
   }
 
   private async createSession(
     user: PublicUser,
-    previousSessionId?: string,
+    previousSession?: { id: string; tokenHash: string },
   ): Promise<SessionResult> {
     const publicUser: PublicUser = {
       id: user.id,
@@ -105,7 +150,7 @@ export class AuthService {
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
     };
-    const sessionId = randomUUID();
+    const sessionId = previousSession?.id ?? randomUUID();
     const refreshDays = this.configService.getOrThrow<number>(
       'JWT_REFRESH_TTL_DAYS',
     );
@@ -113,8 +158,7 @@ export class AuthService {
 
     const accessPayload: AccessTokenPayload = {
       sub: publicUser.id,
-      email: publicUser.email,
-      username: publicUser.username,
+      sid: sessionId,
       type: 'access',
     };
     const refreshPayload: RefreshTokenPayload = {
@@ -133,28 +177,28 @@ export class AuthService {
       this.jwtService.signAsync(refreshPayload, {
         secret: this.configService.getOrThrow<string>('JWT_REFRESH_SECRET'),
         expiresIn: refreshDays * 86_400,
+        jwtid: randomUUID(),
       }),
     ]);
 
     const tokenHash = await argon2.hash(refreshToken, {
       type: argon2.argon2id,
     });
-    await this.prisma.transaction(async (tx) => {
-      const now = new Date();
-      if (previousSessionId) {
-        const revoked = await tx.refreshSession.updateMany({
-          where: {
-            id: previousSessionId,
-            userId: user.id,
-            revokedAt: null,
-            expiresAt: { gt: now },
-          },
-          data: { revokedAt: now },
-        });
-        if (revoked.count !== 1)
-          throw new UnauthorizedException('Invalid session');
-      }
-      await tx.refreshSession.create({
+    if (previousSession) {
+      const rotated = await this.prisma.refreshSession.updateMany({
+        where: {
+          id: sessionId,
+          userId: user.id,
+          tokenHash: previousSession.tokenHash,
+          revokedAt: null,
+          expiresAt: { gt: new Date() },
+        },
+        data: { tokenHash, expiresAt },
+      });
+      if (rotated.count !== 1)
+        throw new UnauthorizedException('Invalid session');
+    } else {
+      await this.prisma.refreshSession.create({
         data: {
           id: sessionId,
           userId: user.id,
@@ -163,7 +207,7 @@ export class AuthService {
           revokedAt: null,
         },
       });
-    });
+    }
 
     return { accessToken, refreshToken, user: publicUser };
   }
@@ -176,9 +220,16 @@ export class AuthService {
         token,
         {
           secret: this.configService.getOrThrow<string>('JWT_REFRESH_SECRET'),
+          algorithms: ['HS256'],
         },
       );
-      if (payload.type !== 'refresh' || !payload.sub || !payload.sid) {
+      if (
+        payload.type !== 'refresh' ||
+        typeof payload.sub !== 'string' ||
+        typeof payload.sid !== 'string' ||
+        !payload.sub ||
+        !payload.sid
+      ) {
         throw new Error('Invalid refresh payload');
       }
 
